@@ -26,6 +26,9 @@ import {
   TestTube,
   Crown,
   Star,
+  Settings,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react'
 
 // ==================== Types ====================
@@ -227,26 +230,215 @@ const GradientButton = ({
   </motion.button>
 )
 
-// ==================== Test Mode Toggle ====================
-const TestModeToggle = ({
+// ==================== Settings Panel ====================
+const SettingsPanel = ({
+  isOpen,
+  onClose,
   testMode,
-  onToggle,
+  onToggleTestMode,
+  onResetData,
 }: {
+  isOpen: boolean
+  onClose: () => void
   testMode: boolean
-  onToggle: () => void
+  onToggleTestMode: () => void
+  onResetData: () => void
+}) => {
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+
+  if (!isOpen) return null
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-[500] flex items-start justify-end p-4"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        {/* Backdrop */}
+        <motion.div
+          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          onClick={onClose}
+        />
+
+        {/* Panel */}
+        <motion.div
+          className="relative mt-12 w-72 glass-strong rounded-2xl p-5 shadow-2xl"
+          initial={{ opacity: 0, x: 50, scale: 0.9 }}
+          animate={{ opacity: 1, x: 0, scale: 1 }}
+          exit={{ opacity: 0, x: 50, scale: 0.9 }}
+          transition={springConfig}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <Settings className="w-5 h-5 text-slate-400" />
+              <h3 className="font-semibold text-white">설정</h3>
+            </div>
+            <motion.button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+            >
+              <X className="w-5 h-5" />
+            </motion.button>
+          </div>
+
+          {/* Test Mode Toggle */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
+              <div className="flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  testMode ? 'bg-yellow-500/20' : 'bg-slate-500/20'
+                }`}>
+                  <TestTube className={`w-4 h-4 ${testMode ? 'text-yellow-400' : 'text-slate-400'}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-white">테스트 모드</p>
+                  <p className="text-xs text-slate-500">시간/위치 제한 해제</p>
+                </div>
+              </div>
+
+              {/* Toggle Switch */}
+              <motion.button
+                className={`relative w-12 h-6 rounded-full transition-colors ${
+                  testMode ? 'bg-yellow-500' : 'bg-slate-600'
+                }`}
+                onClick={onToggleTestMode}
+                whileTap={{ scale: 0.95 }}
+              >
+                <motion.div
+                  className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-md"
+                  animate={{ left: testMode ? '26px' : '4px' }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                />
+              </motion.button>
+            </div>
+
+            {/* Test Mode Active Indicator */}
+            <AnimatePresence>
+              {testMode && (
+                <motion.div
+                  className="mt-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                >
+                  <p className="text-xs text-yellow-400">
+                    테스트 모드 활성화됨 - 출석 제한이 해제됩니다
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-white/10 my-4" />
+
+          {/* Reset Data Button */}
+          <motion.button
+            className="w-full flex items-center justify-between p-3 bg-red-500/10 hover:bg-red-500/20 rounded-xl border border-red-500/30 transition-colors"
+            onClick={() => setShowResetConfirm(true)}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center">
+                <RotateCcw className="w-4 h-4 text-red-400" />
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-medium text-red-400">데이터 초기화</p>
+                <p className="text-xs text-slate-500">모든 데이터 삭제</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-red-400" />
+          </motion.button>
+
+          {/* Reset Confirmation Modal */}
+          <AnimatePresence>
+            {showResetConfirm && (
+              <motion.div
+                className="absolute inset-0 bg-black/80 backdrop-blur-sm rounded-2xl flex items-center justify-center p-4"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <motion.div
+                  className="text-center"
+                  initial={{ scale: 0.8 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0.8 }}
+                >
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
+                    <AlertTriangle className="w-8 h-8 text-red-400" />
+                  </div>
+                  <h4 className="text-lg font-bold text-white mb-2">데이터 초기화</h4>
+                  <p className="text-sm text-slate-400 mb-4 leading-relaxed">
+                    모든 경험치, 닉네임, 캐릭터 정보가<br />
+                    영구 삭제됩니다.<br />
+                    <span className="text-red-400 font-medium">초기화할까요?</span>
+                  </p>
+                  <div className="flex gap-2">
+                    <motion.button
+                      className="flex-1 py-2 px-4 bg-white/10 rounded-xl text-sm text-slate-300"
+                      onClick={() => setShowResetConfirm(false)}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      취소
+                    </motion.button>
+                    <motion.button
+                      className="flex-1 py-2 px-4 bg-red-500 rounded-xl text-sm text-white font-medium"
+                      onClick={() => {
+                        onResetData()
+                        setShowResetConfirm(false)
+                      }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      초기화
+                    </motion.button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  )
+}
+
+// ==================== Settings Button ====================
+const SettingsButton = ({
+  onClick,
+  testMode,
+}: {
+  onClick: () => void
+  testMode: boolean
 }) => (
   <motion.button
-    className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium ${
+    className={`fixed top-4 right-4 z-50 w-10 h-10 rounded-full flex items-center justify-center ${
       testMode
-        ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50'
-        : 'bg-white/5 text-slate-500 border border-white/10'
+        ? 'bg-yellow-500/20 border border-yellow-500/50'
+        : 'bg-white/5 border border-white/10'
     }`}
-    onClick={onToggle}
-    whileHover={{ scale: 1.05 }}
-    whileTap={{ scale: 0.95 }}
+    onClick={onClick}
+    whileHover={{ scale: 1.1, rotate: 90 }}
+    whileTap={{ scale: 0.9 }}
+    transition={{ type: 'spring', stiffness: 400, damping: 17 }}
   >
-    <TestTube className="w-4 h-4" />
-    {testMode ? 'TEST ON' : 'TEST'}
+    <Settings className={`w-5 h-5 ${testMode ? 'text-yellow-400' : 'text-slate-400'}`} />
+    {/* Test Mode Indicator Dot */}
+    {testMode && (
+      <motion.div
+        className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full"
+        animate={{ scale: [1, 1.2, 1] }}
+        transition={{ duration: 1, repeat: Infinity }}
+      />
+    )}
   </motion.button>
 )
 
@@ -1088,12 +1280,14 @@ const DashboardScreen = ({
   isNFCAccess,
   testMode,
   onToggleTestMode,
+  onResetData,
 }: {
   userData: UserData
   onUpdateUserData: (data: UserData) => void
   isNFCAccess: boolean
   testMode: boolean
   onToggleTestMode: () => void
+  onResetData: () => void
 }) => {
   const [expandedCard, setExpandedCard] = useState<string | null>(null)
   const [showCheckInModal, setShowCheckInModal] = useState(false)
@@ -1101,6 +1295,7 @@ const DashboardScreen = ({
   const [newLevel, setNewLevel] = useState(1)
   const [floatingPoint, setFloatingPoint] = useState<{ show: boolean; x: number; y: number }>({ show: false, x: 0, y: 0 })
   const [aiClickRecord, setAIClickRecord] = useState<AIClickRecord>({ date: '', count: 0 })
+  const [showSettings, setShowSettings] = useState(false)
 
   const selectedCharacter = CHARACTERS.find((c) => c.id === userData.characterId)
 
@@ -1143,51 +1338,51 @@ const DashboardScreen = ({
 
     // 오늘 클릭 횟수 확인
     const record = getAIClickRecord()
-    if (record.count >= EXP_AI_CLICK_MAX_DAILY) {
-      // 오늘 최대 횟수 도달
-      return
+    const canEarnExp = record.count < EXP_AI_CLICK_MAX_DAILY
+
+    // EXP 획득 가능한 경우에만 점수 추가
+    if (canEarnExp) {
+      // 클릭 기록 업데이트
+      const newRecord = {
+        date: getTodayKey(),
+        count: record.count + 1,
+      }
+      saveAIClickRecord(newRecord)
+      setAIClickRecord(newRecord)
+
+      // EXP 추가
+      const newTotalExp = userData.totalExp + EXP_AI_CLICK
+      const oldLevel = Math.floor(userData.totalExp / EXP_PER_LEVEL) + 1
+      const newLvl = Math.floor(newTotalExp / EXP_PER_LEVEL) + 1
+
+      const updatedData: UserData = {
+        ...userData,
+        exp: newTotalExp % EXP_PER_LEVEL,
+        level: newLvl,
+        totalExp: newTotalExp,
+      }
+      onUpdateUserData(updatedData)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData))
+
+      // +2 플로팅 애니메이션
+      const rect = (e.target as HTMLElement).getBoundingClientRect()
+      setFloatingPoint({
+        show: true,
+        x: rect.left + rect.width / 2,
+        y: rect.top,
+      })
+      setTimeout(() => setFloatingPoint({ show: false, x: 0, y: 0 }), 1200)
+
+      // 레벨업 체크
+      if (newLvl > oldLevel) {
+        setTimeout(() => {
+          setNewLevel(newLvl)
+          setShowLevelUp(true)
+        }, 500)
+      }
     }
 
-    // 클릭 기록 업데이트
-    const newRecord = {
-      date: getTodayKey(),
-      count: record.count + 1,
-    }
-    saveAIClickRecord(newRecord)
-    setAIClickRecord(newRecord)
-
-    // EXP 추가
-    const newTotalExp = userData.totalExp + EXP_AI_CLICK
-    const oldLevel = Math.floor(userData.totalExp / EXP_PER_LEVEL) + 1
-    const newLvl = Math.floor(newTotalExp / EXP_PER_LEVEL) + 1
-
-    const updatedData: UserData = {
-      ...userData,
-      exp: newTotalExp % EXP_PER_LEVEL,
-      level: newLvl,
-      totalExp: newTotalExp,
-    }
-    onUpdateUserData(updatedData)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData))
-
-    // +2 플로팅 애니메이션
-    const rect = (e.target as HTMLElement).getBoundingClientRect()
-    setFloatingPoint({
-      show: true,
-      x: rect.left + rect.width / 2,
-      y: rect.top,
-    })
-    setTimeout(() => setFloatingPoint({ show: false, x: 0, y: 0 }), 1200)
-
-    // 레벨업 체크
-    if (newLvl > oldLevel) {
-      setTimeout(() => {
-        setNewLevel(newLvl)
-        setShowLevelUp(true)
-      }, 500)
-    }
-
-    // 외부 링크로 이동
+    // 외부 링크로 이동 (EXP 획득 여부와 관계없이 항상 이동)
     window.open('https://knai-safetyprompt-web.vercel.app/', '_blank', 'noopener,noreferrer')
   }
 
@@ -1205,8 +1400,17 @@ const DashboardScreen = ({
       variants={pageTransition}
       transition={{ duration: 0.5 }}
     >
-      {/* Test Mode Toggle */}
-      <TestModeToggle testMode={testMode} onToggle={onToggleTestMode} />
+      {/* Settings Button */}
+      <SettingsButton onClick={() => setShowSettings(true)} testMode={testMode} />
+
+      {/* Settings Panel */}
+      <SettingsPanel
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        testMode={testMode}
+        onToggleTestMode={onToggleTestMode}
+        onResetData={onResetData}
+      />
 
       {/* Level Up Popup */}
       <LevelUpPopup
@@ -1582,6 +1786,11 @@ function MainContent() {
     })
   }, [])
 
+  const handleResetData = useCallback(() => {
+    localStorage.clear()
+    window.location.reload()
+  }, [])
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -1609,6 +1818,7 @@ function MainContent() {
           isNFCAccess={isNFCAccess}
           testMode={testMode}
           onToggleTestMode={handleToggleTestMode}
+          onResetData={handleResetData}
         />
       )}
     </AnimatePresence>
