@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, Suspense, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Image from 'next/image'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import {
   Shield,
   Gamepad2,
@@ -30,6 +30,9 @@ import {
   RotateCcw,
   AlertTriangle,
   Youtube,
+  Telescope,
+  Newspaper,
+  ExternalLink,
 } from 'lucide-react'
 
 // ==================== Types ====================
@@ -57,6 +60,11 @@ interface AIClickRecord {
   count: number
 }
 
+interface LinkClickRecord {
+  date: string
+  clickedLinks: string[]
+}
+
 type TimeSlot = 'morning' | 'lunch' | 'evening'
 
 interface Character {
@@ -80,6 +88,7 @@ const STORAGE_KEY = 'kepco_ai_zone_user'
 const CHECKIN_HISTORY_KEY = 'checkInHistory'
 const TEST_MODE_KEY = 'kepco_test_mode'
 const AI_CLICK_KEY = 'kepco_ai_click'
+const LINK_CLICK_KEY = 'kepco_link_click'
 
 // GPS 설정 - 한전 경남본부 좌표 (필요시 수정)
 const TARGET_LAT = 35.1795
@@ -91,6 +100,7 @@ const EXP_NFC = 20
 const EXP_GPS = 10
 const EXP_AI_CLICK = 2
 const EXP_AI_CLICK_MAX_DAILY = 5
+const EXP_LINK_CLICK = 5
 const EXP_PER_LEVEL = 100
 
 // 타임슬롯 설정
@@ -167,6 +177,22 @@ const getAIClickRecord = (): AIClickRecord => {
 
 const saveAIClickRecord = (record: AIClickRecord) => {
   localStorage.setItem(AI_CLICK_KEY, JSON.stringify(record))
+}
+
+const getLinkClickRecord = (): LinkClickRecord => {
+  if (typeof window === 'undefined') return { date: '', clickedLinks: [] }
+  const stored = localStorage.getItem(LINK_CLICK_KEY)
+  if (stored) {
+    const record = JSON.parse(stored)
+    if (record.date === getTodayKey()) {
+      return record
+    }
+  }
+  return { date: getTodayKey(), clickedLinks: [] }
+}
+
+const saveLinkClickRecord = (record: LinkClickRecord) => {
+  localStorage.setItem(LINK_CLICK_KEY, JSON.stringify(record))
 }
 
 const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -443,8 +469,8 @@ const SettingsButton = ({
   </motion.button>
 )
 
-// ==================== Floating +2 Animation ====================
-const FloatingPointAnimation = ({ show, x, y }: { show: boolean; x: number; y: number }) => {
+// ==================== Floating EXP Animation ====================
+const FloatingPointAnimation = ({ show, x, y, amount }: { show: boolean; x: number; y: number; amount: number }) => {
   if (!show) return null
 
   return (
@@ -456,8 +482,72 @@ const FloatingPointAnimation = ({ show, x, y }: { show: boolean; x: number; y: n
       transition={{ duration: 1.2, ease: 'easeOut' }}
     >
       <span className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-kepco-cyan to-green-400 drop-shadow-lg">
-        +{EXP_AI_CLICK}
+        +{amount}
       </span>
+    </motion.div>
+  )
+}
+
+// ==================== Link EXP Celebration Animation ====================
+const LinkExpCelebration = ({ show, onComplete }: { show: boolean; onComplete: () => void }) => {
+  useEffect(() => {
+    if (show) {
+      const timer = setTimeout(onComplete, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [show, onComplete])
+
+  if (!show) return null
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[350] flex items-center justify-center pointer-events-none"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      {/* Particle Burst */}
+      {[...Array(15)].map((_, i) => (
+        <motion.div
+          key={i}
+          className="absolute w-2 h-2 rounded-full"
+          style={{
+            backgroundColor: ['#00D4FF', '#A855F7', '#22C55E', '#FBBF24', '#EC4899'][i % 5],
+          }}
+          initial={{ x: 0, y: 0, scale: 0, opacity: 1 }}
+          animate={{
+            x: (Math.random() - 0.5) * 200,
+            y: (Math.random() - 0.5) * 200,
+            scale: [0, 1.5, 0],
+            opacity: [1, 1, 0],
+          }}
+          transition={{ duration: 1, delay: i * 0.03, ease: 'easeOut' }}
+        />
+      ))}
+
+      {/* Main Content */}
+      <motion.div
+        className="text-center"
+        initial={{ scale: 0 }}
+        animate={{ scale: [0, 1.3, 1] }}
+        transition={{ duration: 0.5, ease: 'easeOut' }}
+      >
+        <motion.div
+          className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 via-cyan-400 to-purple-500"
+          animate={{ scale: [1, 1.1, 1] }}
+          transition={{ duration: 0.3, repeat: 3 }}
+        >
+          +{EXP_LINK_CLICK} EXP!
+        </motion.div>
+        <motion.p
+          className="text-white/80 text-sm mt-2"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          미션 보너스 획득!
+        </motion.p>
+      </motion.div>
     </motion.div>
   )
 }
@@ -1404,9 +1494,11 @@ const DashboardScreen = ({
   const [showCheckInModal, setShowCheckInModal] = useState(false)
   const [showLevelUp, setShowLevelUp] = useState(false)
   const [newLevel, setNewLevel] = useState(1)
-  const [floatingPoint, setFloatingPoint] = useState<{ show: boolean; x: number; y: number }>({ show: false, x: 0, y: 0 })
+  const [floatingPoint, setFloatingPoint] = useState<{ show: boolean; x: number; y: number; amount: number }>({ show: false, x: 0, y: 0, amount: 2 })
   const [aiClickRecord, setAIClickRecord] = useState<AIClickRecord>({ date: '', count: 0 })
+  const [linkClickRecord, setLinkClickRecord] = useState<LinkClickRecord>({ date: '', clickedLinks: [] })
   const [showSettings, setShowSettings] = useState(false)
+  const [showLinkCelebration, setShowLinkCelebration] = useState(false)
 
   const selectedCharacter = CHARACTERS.find((c) => c.id === userData.characterId)
 
@@ -1417,6 +1509,7 @@ const DashboardScreen = ({
 
   useEffect(() => {
     setAIClickRecord(getAIClickRecord())
+    setLinkClickRecord(getLinkClickRecord())
   }, [])
 
   const toggleCard = (cardId: string) => {
@@ -1442,6 +1535,59 @@ const DashboardScreen = ({
       setNewLevel(newLvl)
       setShowLevelUp(true)
     }
+  }
+
+  // 외부 링크 클릭 처리 (Simulation, News 등)
+  const handleExternalLinkClick = (e: React.MouseEvent, linkId: string, url: string) => {
+    e.stopPropagation()
+
+    // 오늘 이 링크를 클릭했는지 확인
+    const record = getLinkClickRecord()
+    const alreadyClicked = record.clickedLinks.includes(linkId)
+
+    // 아직 클릭 안한 경우 EXP 적립
+    if (!alreadyClicked) {
+      // 클릭 기록 업데이트
+      const newRecord: LinkClickRecord = {
+        date: getTodayKey(),
+        clickedLinks: [...record.clickedLinks, linkId],
+      }
+      saveLinkClickRecord(newRecord)
+      setLinkClickRecord(newRecord)
+
+      // EXP 추가
+      const newTotalExp = userData.totalExp + EXP_LINK_CLICK
+      const oldLevel = Math.floor(userData.totalExp / EXP_PER_LEVEL) + 1
+      const newLvl = Math.floor(newTotalExp / EXP_PER_LEVEL) + 1
+
+      const updatedData: UserData = {
+        ...userData,
+        exp: newTotalExp % EXP_PER_LEVEL,
+        level: newLvl,
+        totalExp: newTotalExp,
+      }
+      onUpdateUserData(updatedData)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData))
+
+      // 화려한 EXP 애니메이션
+      setShowLinkCelebration(true)
+
+      // 레벨업 체크
+      if (newLvl > oldLevel) {
+        setTimeout(() => {
+          setNewLevel(newLvl)
+          setShowLevelUp(true)
+        }, 2000)
+      }
+    }
+
+    // 외부 링크로 이동
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  // 링크 보상 가능 여부 확인
+  const canEarnLinkExp = (linkId: string) => {
+    return !linkClickRecord.clickedLinks.includes(linkId)
   }
 
   const handleAIClick = (e: React.MouseEvent) => {
@@ -1481,8 +1627,9 @@ const DashboardScreen = ({
         show: true,
         x: rect.left + rect.width / 2,
         y: rect.top,
+        amount: EXP_AI_CLICK,
       })
-      setTimeout(() => setFloatingPoint({ show: false, x: 0, y: 0 }), 1200)
+      setTimeout(() => setFloatingPoint({ show: false, x: 0, y: 0, amount: EXP_AI_CLICK }), 1200)
 
       // 레벨업 체크
       if (newLvl > oldLevel) {
@@ -1530,8 +1677,14 @@ const DashboardScreen = ({
         onClose={() => setShowLevelUp(false)}
       />
 
-      {/* Floating +2 Animation */}
-      <FloatingPointAnimation show={floatingPoint.show} x={floatingPoint.x} y={floatingPoint.y} />
+      {/* Link EXP Celebration */}
+      <LinkExpCelebration
+        show={showLinkCelebration}
+        onComplete={() => setShowLinkCelebration(false)}
+      />
+
+      {/* Floating EXP Animation */}
+      <FloatingPointAnimation show={floatingPoint.show} x={floatingPoint.x} y={floatingPoint.y} amount={floatingPoint.amount} />
 
       {/* Background Effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1677,19 +1830,19 @@ const DashboardScreen = ({
           </GlassCard>
         </motion.div>
 
-        {/* Bottom Row */}
+        {/* 4-Grid Bento Layout */}
         <div className="grid grid-cols-2 gap-4">
           {/* AI App Card */}
           <motion.div variants={fadeInUp}>
             <GlassCard
-              className="p-4 cursor-pointer"
+              className="p-4 cursor-pointer min-h-[160px]"
               onClick={() => toggleCard('ai')}
             >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center mb-3">
-                <Shield className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center mb-2">
+                <Shield className="w-5 h-5 text-white" />
               </div>
-              <h3 className="font-semibold mb-1">AI app</h3>
-              <p className="text-xs text-slate-400 mb-3">AI 서비스 List</p>
+              <h3 className="font-semibold text-sm mb-0.5">AI app</h3>
+              <p className="text-[10px] text-slate-400 mb-2">AI 서비스 List</p>
 
               <AnimatePresence>
                 {expandedCard === 'ai' && (
@@ -1702,18 +1855,24 @@ const DashboardScreen = ({
                   >
                     <div className="space-y-2 pt-2 border-t border-white/10">
                       <motion.button
-                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-kepco-blue/50 to-kepco-cyan/50 text-xs text-left flex items-center justify-between"
-                        whileHover={{ scale: 1.02 }}
+                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-kepco-blue/50 to-kepco-cyan/50 text-[10px] text-left flex items-center justify-between relative overflow-hidden group"
+                        whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(0, 212, 255, 0.3)' }}
                         whileTap={{ scale: 0.98 }}
                         onClick={handleAIClick}
                       >
-                        <span>AI 프롬프트 보안검증</span>
+                        {/* Neon glow effect on hover */}
+                        <motion.div
+                          className="absolute inset-0 bg-gradient-to-r from-kepco-cyan/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+                        />
+                        <span className="relative z-10 flex items-center gap-1">
+                          AI 보안검증 <ExternalLink className="w-3 h-3" />
+                        </span>
                         {aiClickRecord.count < EXP_AI_CLICK_MAX_DAILY && (
-                          <span className="text-green-400 text-[10px] font-medium">+{EXP_AI_CLICK} EXP</span>
+                          <span className="relative z-10 text-green-400 text-[10px] font-medium">+{EXP_AI_CLICK}</span>
                         )}
                       </motion.button>
                       <motion.button
-                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-xs text-slate-400 text-left flex items-center gap-2"
+                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-[10px] text-slate-400 text-left flex items-center gap-2"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                       >
@@ -1725,7 +1884,7 @@ const DashboardScreen = ({
               </AnimatePresence>
 
               <motion.div
-                className="flex justify-end mt-2"
+                className="flex justify-end mt-auto pt-2"
                 animate={{ rotate: expandedCard === 'ai' ? 90 : 0 }}
               >
                 <ChevronRight className="w-4 h-4 text-slate-500" />
@@ -1736,15 +1895,15 @@ const DashboardScreen = ({
           {/* GAME Card */}
           <motion.div variants={fadeInUp}>
             <GlassCard
-              className="p-4 cursor-pointer"
+              className="p-4 cursor-pointer min-h-[160px]"
               onClick={() => toggleCard('game')}
             >
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-600 to-pink-500 flex items-center justify-center mb-3">
-                <Gamepad2 className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-pink-500 flex items-center justify-center mb-2">
+                <Gamepad2 className="w-5 h-5 text-white" />
               </div>
-              <h3 className="font-semibold mb-1">GAME</h3>
-              <p className="text-xs text-slate-400 mb-1">보상을 통한 에너지 학습</p>
-              <p className="text-[10px] text-kepco-cyan">참여 시 EXP 적립</p>
+              <h3 className="font-semibold text-sm mb-0.5">GAME</h3>
+              <p className="text-[10px] text-slate-400 mb-1">보상형 에너지 학습</p>
+              <p className="text-[10px] text-purple-400">참여 시 EXP 적립</p>
 
               <AnimatePresence>
                 {expandedCard === 'game' && (
@@ -1757,7 +1916,7 @@ const DashboardScreen = ({
                   >
                     <div className="space-y-2 pt-2 border-t border-white/10">
                       <motion.button
-                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-xs text-slate-400 text-left flex items-center gap-2"
+                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-[10px] text-slate-400 text-left flex items-center gap-2"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                       >
@@ -1769,8 +1928,142 @@ const DashboardScreen = ({
               </AnimatePresence>
 
               <motion.div
-                className="flex justify-end mt-2"
+                className="flex justify-end mt-auto pt-2"
                 animate={{ rotate: expandedCard === 'game' ? 90 : 0 }}
+              >
+                <ChevronRight className="w-4 h-4 text-slate-500" />
+              </motion.div>
+            </GlassCard>
+          </motion.div>
+
+          {/* SIMULATION Card */}
+          <motion.div variants={fadeInUp}>
+            <GlassCard
+              className="p-4 cursor-pointer min-h-[160px]"
+              onClick={() => toggleCard('simulation')}
+            >
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center mb-2">
+                <Telescope className="w-5 h-5 text-white" />
+              </div>
+              <h3 className="font-semibold text-sm mb-0.5">SIMULATION</h3>
+              <p className="text-[10px] text-slate-400 mb-1">미래기술 경험해보기</p>
+              <p className="text-[10px] text-emerald-400">하루 1회 +{EXP_LINK_CLICK} EXP</p>
+
+              <AnimatePresence>
+                {expandedCard === 'simulation' && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={springConfig}
+                    className="overflow-hidden"
+                  >
+                    <div className="space-y-2 pt-2 border-t border-white/10">
+                      {/* V2G System */}
+                      <motion.button
+                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-[10px] text-left flex items-center justify-between relative overflow-hidden group"
+                        whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(16, 185, 129, 0.4)' }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={(e) => handleExternalLinkClick(e, 'v2g', 'https://kepco-v2g-game.vercel.app/')}
+                      >
+                        <motion.div
+                          className="absolute inset-0 bg-gradient-to-r from-emerald-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+                        />
+                        <span className="relative z-10 flex items-center gap-1 text-emerald-300">
+                          V2G System <ExternalLink className="w-3 h-3" />
+                        </span>
+                        {canEarnLinkExp('v2g') && (
+                          <span className="relative z-10 text-green-400 font-medium">+{EXP_LINK_CLICK}</span>
+                        )}
+                      </motion.button>
+
+                      {/* VPP 가상발전소 */}
+                      <motion.button
+                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-teal-500/30 to-cyan-500/30 text-[10px] text-left flex items-center justify-between relative overflow-hidden group"
+                        whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(20, 184, 166, 0.4)' }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={(e) => handleExternalLinkClick(e, 'vpp', 'https://vpp-game.vercel.app/')}
+                      >
+                        <motion.div
+                          className="absolute inset-0 bg-gradient-to-r from-teal-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+                        />
+                        <span className="relative z-10 flex items-center gap-1 text-teal-300">
+                          VPP 가상발전소 <ExternalLink className="w-3 h-3" />
+                        </span>
+                        {canEarnLinkExp('vpp') && (
+                          <span className="relative z-10 text-green-400 font-medium">+{EXP_LINK_CLICK}</span>
+                        )}
+                      </motion.button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <motion.div
+                className="flex justify-end mt-auto pt-2"
+                animate={{ rotate: expandedCard === 'simulation' ? 90 : 0 }}
+              >
+                <ChevronRight className="w-4 h-4 text-slate-500" />
+              </motion.div>
+            </GlassCard>
+          </motion.div>
+
+          {/* NEWS Card */}
+          <motion.div variants={fadeInUp}>
+            <GlassCard
+              className="p-4 cursor-pointer min-h-[160px]"
+              onClick={() => toggleCard('news')}
+            >
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center mb-2">
+                <Newspaper className="w-5 h-5 text-white" />
+              </div>
+              <h3 className="font-semibold text-sm mb-0.5">News</h3>
+              <p className="text-[10px] text-slate-400 mb-1">에너지 소식</p>
+              <p className="text-[10px] text-orange-400">하루 1회 +{EXP_LINK_CLICK} EXP</p>
+
+              <AnimatePresence>
+                {expandedCard === 'news' && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={springConfig}
+                    className="overflow-hidden"
+                  >
+                    <div className="space-y-2 pt-2 border-t border-white/10">
+                      {/* 에너지인사이트 */}
+                      <motion.button
+                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-orange-500/30 to-red-500/30 text-[10px] text-left flex items-center justify-between relative overflow-hidden group"
+                        whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(249, 115, 22, 0.4)' }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={(e) => handleExternalLinkClick(e, 'energy-insight', 'https://www.youtube.com/@energy-insight')}
+                      >
+                        <motion.div
+                          className="absolute inset-0 bg-gradient-to-r from-orange-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+                        />
+                        <span className="relative z-10 flex items-center gap-1 text-orange-300">
+                          에너지인사이트 <ExternalLink className="w-3 h-3" />
+                        </span>
+                        {canEarnLinkExp('energy-insight') && (
+                          <span className="relative z-10 text-green-400 font-medium">+{EXP_LINK_CLICK}</span>
+                        )}
+                      </motion.button>
+
+                      {/* 모집중 - 비활성 */}
+                      <motion.button
+                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-[10px] text-slate-500 text-left flex items-center gap-2 cursor-not-allowed opacity-60"
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <Construction className="w-3 h-3" /> 모집중
+                      </motion.button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <motion.div
+                className="flex justify-end mt-auto pt-2"
+                animate={{ rotate: expandedCard === 'news' ? 90 : 0 }}
               >
                 <ChevronRight className="w-4 h-4 text-slate-500" />
               </motion.div>
@@ -1839,24 +2132,25 @@ const NavButton = ({
 // ==================== Main App Component ====================
 function MainContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const [userData, setUserData] = useState<UserData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [isNFCAccess, setIsNFCAccess] = useState(false)
   const [testMode, setTestMode] = useState(false)
+  // 신규 사용자가 온보딩을 완료했는지 추적 (NFC 이벤트 방지용)
+  const justCompletedOnboarding = useRef(false)
 
   useEffect(() => {
-    // NFC 접속 확인
-    const source = searchParams.get('source')
-    if (source === 'nfc') {
-      setIsNFCAccess(true)
-    }
-
     // 테스트 모드 확인
     const savedTestMode = localStorage.getItem(TEST_MODE_KEY)
     if (savedTestMode === 'true') {
       setTestMode(true)
     }
+
+    // NFC 접속 확인
+    const source = searchParams.get('source')
+    const isNFC = source === 'nfc'
 
     // Check localStorage for existing user
     const storedData = localStorage.getItem(STORAGE_KEY)
@@ -1871,18 +2165,34 @@ function MainContent() {
         parsed.level = Math.floor(parsed.totalExp / EXP_PER_LEVEL) + 1
         parsed.exp = parsed.totalExp % EXP_PER_LEVEL
         setUserData(parsed)
+
+        // 기존 사용자 + NFC 접속 = NFC 출석 이벤트 발생
+        if (isNFC) {
+          setIsNFCAccess(true)
+        }
       } catch {
         setShowOnboarding(true)
+        // 신규 사용자 (파싱 실패) + NFC 접속 = 온보딩 먼저, NFC 이벤트 발생 안함
       }
     } else {
       setShowOnboarding(true)
+      // 신규 사용자 (데이터 없음) + NFC 접속 = 온보딩 먼저, NFC 이벤트 발생 안함
     }
+
+    // URL 파라미터 정리 (주소창 깔끔하게 유지)
+    if (isNFC) {
+      router.replace('/', { scroll: false })
+    }
+
     setIsLoading(false)
-  }, [searchParams])
+  }, [searchParams, router])
 
   const handleOnboardingComplete = useCallback((data: UserData) => {
+    // 온보딩 완료 시 NFC 이벤트 방지 플래그 설정
+    justCompletedOnboarding.current = true
     setUserData(data)
     setShowOnboarding(false)
+    // isNFCAccess는 false로 유지 (신규 사용자이므로 NFC 출석 이벤트 발생 안함)
   }, [])
 
   const handleUpdateUserData = useCallback((data: UserData) => {
