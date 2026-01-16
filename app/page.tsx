@@ -12,6 +12,7 @@ import {
   Bell,
   UserCircle,
   ChevronRight,
+  ChevronDown,
   Sparkles,
   Trophy,
   Zap,
@@ -21,11 +22,10 @@ import {
   Check,
   X,
   CalendarCheck,
-  Gift,
   Target,
-  Clock,
   TestTube,
   Crown,
+  Star,
 } from 'lucide-react'
 
 // ==================== Types ====================
@@ -46,6 +46,11 @@ interface CheckInRecord {
 
 interface CheckInHistory {
   [date: string]: CheckInRecord
+}
+
+interface AIClickRecord {
+  date: string
+  count: number
 }
 
 type TimeSlot = 'morning' | 'lunch' | 'evening'
@@ -70,6 +75,7 @@ const CHARACTERS: Character[] = [
 const STORAGE_KEY = 'kepco_ai_zone_user'
 const CHECKIN_HISTORY_KEY = 'checkInHistory'
 const TEST_MODE_KEY = 'kepco_test_mode'
+const AI_CLICK_KEY = 'kepco_ai_click'
 
 // GPS 설정 - 한전 경남본부 좌표 (필요시 수정)
 const TARGET_LAT = 35.1795
@@ -79,6 +85,8 @@ const ALLOWED_RADIUS = 100
 // EXP 설정
 const EXP_NFC = 20
 const EXP_GPS = 10
+const EXP_AI_CLICK = 2
+const EXP_AI_CLICK_MAX_DAILY = 5
 const EXP_PER_LEVEL = 100
 
 // 타임슬롯 설정
@@ -139,6 +147,22 @@ const getCheckInHistory = (): CheckInHistory => {
 
 const saveCheckInHistory = (history: CheckInHistory) => {
   localStorage.setItem(CHECKIN_HISTORY_KEY, JSON.stringify(history))
+}
+
+const getAIClickRecord = (): AIClickRecord => {
+  if (typeof window === 'undefined') return { date: '', count: 0 }
+  const stored = localStorage.getItem(AI_CLICK_KEY)
+  if (stored) {
+    const record = JSON.parse(stored)
+    if (record.date === getTodayKey()) {
+      return record
+    }
+  }
+  return { date: getTodayKey(), count: 0 }
+}
+
+const saveAIClickRecord = (record: AIClickRecord) => {
+  localStorage.setItem(AI_CLICK_KEY, JSON.stringify(record))
 }
 
 const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -225,6 +249,125 @@ const TestModeToggle = ({
     {testMode ? 'TEST ON' : 'TEST'}
   </motion.button>
 )
+
+// ==================== Floating +2 Animation ====================
+const FloatingPointAnimation = ({ show, x, y }: { show: boolean; x: number; y: number }) => {
+  if (!show) return null
+
+  return (
+    <motion.div
+      className="fixed z-[300] pointer-events-none"
+      style={{ left: x, top: y }}
+      initial={{ opacity: 1, y: 0, scale: 1 }}
+      animate={{ opacity: 0, y: -60, scale: 1.5 }}
+      transition={{ duration: 1.2, ease: 'easeOut' }}
+    >
+      <span className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-kepco-cyan to-green-400 drop-shadow-lg">
+        +{EXP_AI_CLICK}
+      </span>
+    </motion.div>
+  )
+}
+
+// ==================== Level Up Popup ====================
+const LevelUpPopup = ({ show, level, onClose }: { show: boolean; level: number; onClose: () => void }) => {
+  useEffect(() => {
+    if (show) {
+      const timer = setTimeout(onClose, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [show, onClose])
+
+  if (!show) return null
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-[400] flex items-center justify-center pointer-events-auto"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+      >
+        {/* Backdrop */}
+        <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+
+        {/* Confetti Particles */}
+        {[...Array(30)].map((_, i) => (
+          <motion.div
+            key={i}
+            className="absolute w-3 h-3 rounded-full"
+            style={{
+              backgroundColor: ['#FFD700', '#00D4FF', '#FF6B6B', '#4ECDC4', '#A855F7'][i % 5],
+            }}
+            initial={{
+              x: 0,
+              y: 0,
+              scale: 0,
+              opacity: 1,
+            }}
+            animate={{
+              x: (Math.random() - 0.5) * 400,
+              y: (Math.random() - 0.5) * 400,
+              scale: [0, 1.5, 0],
+              opacity: [1, 1, 0],
+              rotate: Math.random() * 360,
+            }}
+            transition={{
+              duration: 2,
+              delay: i * 0.03,
+              ease: 'easeOut',
+            }}
+          />
+        ))}
+
+        {/* Main Content */}
+        <motion.div
+          className="relative z-10 text-center p-8"
+          initial={{ scale: 0, rotate: -10 }}
+          animate={{ scale: [0, 1.2, 1], rotate: [10, -5, 0] }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
+        >
+          <motion.div
+            className="flex items-center justify-center gap-3 mb-4"
+            animate={{ y: [0, -10, 0] }}
+            transition={{ duration: 0.8, repeat: Infinity }}
+          >
+            <Star className="w-16 h-16 text-yellow-400 fill-yellow-400" />
+          </motion.div>
+
+          <motion.h2
+            className="text-5xl font-black mb-2"
+            animate={{ scale: [1, 1.05, 1] }}
+            transition={{ duration: 0.5, repeat: Infinity }}
+          >
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-400 to-pink-500">
+              LEVEL UP!
+            </span>
+          </motion.h2>
+
+          <motion.div
+            className="text-6xl font-black text-white mt-4"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            Lv.{level}
+          </motion.div>
+
+          <motion.p
+            className="text-slate-300 text-lg mt-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            축하합니다! 🎉
+          </motion.p>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  )
+}
 
 // ==================== Golden Pass Animation ====================
 const GoldenPassAnimation = ({ show }: { show: boolean }) => {
@@ -668,66 +811,75 @@ const CheckInModal = ({
   )
 }
 
-// ==================== Mission Card ====================
-const MissionCard = () => (
-  <motion.div variants={fadeInUp} className="mb-4">
-    <GlassCard className="p-5">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-          <Target className="w-5 h-5 text-white" />
-        </div>
-        <div>
-          <h3 className="font-semibold">EXP 획득 방법</h3>
-          <p className="text-slate-400 text-xs">미션을 완료하고 레벨업하세요!</p>
-        </div>
-      </div>
+// ==================== EXP Accordion Section ====================
+const ExpAccordion = ({ aiClickCount }: { aiClickCount: number }) => {
+  const [isOpen, setIsOpen] = useState(false)
 
-      <div className="space-y-3">
-        {/* NFC */}
-        <div className="flex items-center justify-between p-3 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-xl border border-yellow-500/20">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-yellow-500/20 flex items-center justify-center">
-              <Crown className="w-4 h-4 text-yellow-400" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-yellow-400">NFC 키링 태그</p>
-              <p className="text-xs text-slate-500">하이패스 보너스</p>
-            </div>
-          </div>
-          <span className="text-lg font-bold text-yellow-400">+{EXP_NFC}</span>
+  return (
+    <div className="mt-4 border-t border-white/10 pt-4">
+      <motion.button
+        className="w-full flex items-center justify-between text-sm"
+        onClick={() => setIsOpen(!isOpen)}
+        whileTap={{ scale: 0.98 }}
+      >
+        <div className="flex items-center gap-2">
+          <Target className="w-4 h-4 text-purple-400" />
+          <span className="text-slate-300 font-medium">EXP 획득 방법</span>
         </div>
+        <motion.div
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <ChevronDown className="w-4 h-4 text-slate-500" />
+        </motion.div>
+      </motion.button>
 
-        {/* GPS */}
-        <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-kepco-cyan/20 flex items-center justify-center">
-              <MapPin className="w-4 h-4 text-kepco-cyan" />
-            </div>
-            <div>
-              <p className="text-sm font-medium">일반 GPS 인증</p>
-              <p className="text-xs text-slate-500">위치 확인 출석</p>
-            </div>
-          </div>
-          <span className="text-lg font-bold text-kepco-cyan">+{EXP_GPS}</span>
-        </div>
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-2 pt-3">
+              {/* NFC */}
+              <div className="flex items-center justify-between p-3 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-xl border border-yellow-500/20">
+                <div className="flex items-center gap-2">
+                  <Crown className="w-4 h-4 text-yellow-400" />
+                  <span className="text-sm text-yellow-400">NFC 키링 태그</span>
+                </div>
+                <span className="text-sm font-bold text-yellow-400">+{EXP_NFC}</span>
+              </div>
 
-        {/* Game - Coming Soon */}
-        <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10 opacity-50">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
-              <Gamepad2 className="w-4 h-4 text-purple-400" />
+              {/* GPS */}
+              <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-kepco-cyan" />
+                  <span className="text-sm text-slate-300">일반 GPS 인증</span>
+                </div>
+                <span className="text-sm font-bold text-kepco-cyan">+{EXP_GPS}</span>
+              </div>
+
+              {/* AI 프롬프트 보안검증 */}
+              <div className="flex items-center justify-between p-3 bg-gradient-to-r from-blue-500/10 to-cyan-500/10 rounded-xl border border-blue-500/20">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-blue-400" />
+                  <div className="flex flex-col">
+                    <span className="text-sm text-blue-400">AI 프롬프트 보안검증 활용</span>
+                    <span className="text-xs text-slate-500">오늘 {aiClickCount}/{EXP_AI_CLICK_MAX_DAILY}회</span>
+                  </div>
+                </div>
+                <span className="text-sm font-bold text-blue-400">+{EXP_AI_CLICK}</span>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium text-slate-400">게임 참여</p>
-              <p className="text-xs text-slate-500">추후 업데이트</p>
-            </div>
-          </div>
-          <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">COMING</span>
-        </div>
-      </div>
-    </GlassCard>
-  </motion.div>
-)
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
 
 // ==================== Onboarding Screen ====================
 const OnboardingScreen = ({
@@ -945,26 +1097,98 @@ const DashboardScreen = ({
 }) => {
   const [expandedCard, setExpandedCard] = useState<string | null>(null)
   const [showCheckInModal, setShowCheckInModal] = useState(false)
+  const [showLevelUp, setShowLevelUp] = useState(false)
+  const [newLevel, setNewLevel] = useState(1)
+  const [floatingPoint, setFloatingPoint] = useState<{ show: boolean; x: number; y: number }>({ show: false, x: 0, y: 0 })
+  const [aiClickRecord, setAIClickRecord] = useState<AIClickRecord>({ date: '', count: 0 })
+
   const selectedCharacter = CHARACTERS.find((c) => c.id === userData.characterId)
 
-  const expPercent = (userData.exp / EXP_PER_LEVEL) * 100
+  // 레벨 계산: 누적 EXP 기반
+  const calculatedLevel = Math.floor(userData.totalExp / EXP_PER_LEVEL) + 1
+  const expPercent = (userData.totalExp % EXP_PER_LEVEL) / EXP_PER_LEVEL * 100
+  const currentLevelExp = userData.totalExp % EXP_PER_LEVEL
+
+  useEffect(() => {
+    setAIClickRecord(getAIClickRecord())
+  }, [])
 
   const toggleCard = (cardId: string) => {
     setExpandedCard(expandedCard === cardId ? null : cardId)
   }
 
   const handleCheckInSuccess = (exp: number) => {
-    const newTotalExp = (userData.totalExp || 0) + exp
-    const newExp = userData.exp + exp
-    const levelUps = Math.floor(newExp / EXP_PER_LEVEL)
+    const newTotalExp = userData.totalExp + exp
+    const oldLevel = Math.floor(userData.totalExp / EXP_PER_LEVEL) + 1
+    const newLvl = Math.floor(newTotalExp / EXP_PER_LEVEL) + 1
+
     const updatedData: UserData = {
       ...userData,
-      exp: newExp % EXP_PER_LEVEL,
-      level: userData.level + levelUps,
+      exp: newTotalExp % EXP_PER_LEVEL,
+      level: newLvl,
       totalExp: newTotalExp,
     }
     onUpdateUserData(updatedData)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData))
+
+    // 레벨업 체크
+    if (newLvl > oldLevel) {
+      setNewLevel(newLvl)
+      setShowLevelUp(true)
+    }
+  }
+
+  const handleAIClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+
+    // 오늘 클릭 횟수 확인
+    const record = getAIClickRecord()
+    if (record.count >= EXP_AI_CLICK_MAX_DAILY) {
+      // 오늘 최대 횟수 도달
+      return
+    }
+
+    // 클릭 기록 업데이트
+    const newRecord = {
+      date: getTodayKey(),
+      count: record.count + 1,
+    }
+    saveAIClickRecord(newRecord)
+    setAIClickRecord(newRecord)
+
+    // EXP 추가
+    const newTotalExp = userData.totalExp + EXP_AI_CLICK
+    const oldLevel = Math.floor(userData.totalExp / EXP_PER_LEVEL) + 1
+    const newLvl = Math.floor(newTotalExp / EXP_PER_LEVEL) + 1
+
+    const updatedData: UserData = {
+      ...userData,
+      exp: newTotalExp % EXP_PER_LEVEL,
+      level: newLvl,
+      totalExp: newTotalExp,
+    }
+    onUpdateUserData(updatedData)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData))
+
+    // +2 플로팅 애니메이션
+    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    setFloatingPoint({
+      show: true,
+      x: rect.left + rect.width / 2,
+      y: rect.top,
+    })
+    setTimeout(() => setFloatingPoint({ show: false, x: 0, y: 0 }), 1200)
+
+    // 레벨업 체크
+    if (newLvl > oldLevel) {
+      setTimeout(() => {
+        setNewLevel(newLvl)
+        setShowLevelUp(true)
+      }, 500)
+    }
+
+    // 외부 링크로 이동
+    window.open('https://knai-safetyprompt-web.vercel.app/', '_blank', 'noopener,noreferrer')
   }
 
   useEffect(() => {
@@ -983,6 +1207,16 @@ const DashboardScreen = ({
     >
       {/* Test Mode Toggle */}
       <TestModeToggle testMode={testMode} onToggle={onToggleTestMode} />
+
+      {/* Level Up Popup */}
+      <LevelUpPopup
+        show={showLevelUp}
+        level={newLevel}
+        onClose={() => setShowLevelUp(false)}
+      />
+
+      {/* Floating +2 Animation */}
+      <FloatingPointAnimation show={floatingPoint.show} x={floatingPoint.x} y={floatingPoint.y} />
 
       {/* Background Effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1089,14 +1323,14 @@ const DashboardScreen = ({
             {/* Stats */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white/5 rounded-xl p-3 text-center">
-                <div className="text-2xl font-bold text-kepco-cyan">Lv.{userData.level}</div>
+                <div className="text-2xl font-bold text-kepco-cyan">Lv.{calculatedLevel}</div>
                 <div className="text-xs text-slate-400">레벨</div>
               </div>
 
               <div className="bg-white/5 rounded-xl p-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-slate-400">EXP</span>
-                  <span className="text-xs text-kepco-cyan">{userData.exp}/{EXP_PER_LEVEL}</span>
+                  <span className="text-xs text-kepco-cyan">{currentLevelExp}/{EXP_PER_LEVEL}</span>
                 </div>
                 <div className="h-2 bg-white/10 rounded-full overflow-hidden">
                   <motion.div
@@ -1120,13 +1354,13 @@ const DashboardScreen = ({
             {/* Total EXP */}
             <div className="mt-3 pt-3 border-t border-white/10 flex justify-between items-center">
               <span className="text-xs text-slate-500">누적 EXP</span>
-              <span className="text-sm font-medium text-kepco-cyan">{userData.totalExp || 0} EXP</span>
+              <span className="text-sm font-medium text-kepco-cyan">{userData.totalExp} EXP</span>
             </div>
+
+            {/* EXP Accordion */}
+            <ExpAccordion aiClickCount={aiClickRecord.count} />
           </GlassCard>
         </motion.div>
-
-        {/* Mission Card */}
-        <MissionCard />
 
         {/* Bottom Row */}
         <div className="grid grid-cols-2 gap-4">
@@ -1152,17 +1386,17 @@ const DashboardScreen = ({
                     className="overflow-hidden"
                   >
                     <div className="space-y-2 pt-2 border-t border-white/10">
-                      <motion.a
-                        href="https://knai-safetyprompt-web.vercel.app/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-kepco-blue/50 to-kepco-cyan/50 text-xs text-left block"
+                      <motion.button
+                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-kepco-blue/50 to-kepco-cyan/50 text-xs text-left flex items-center justify-between"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={handleAIClick}
                       >
-                        AI 프롬프트 보안검증
-                      </motion.a>
+                        <span>AI 프롬프트 보안검증</span>
+                        {aiClickRecord.count < EXP_AI_CLICK_MAX_DAILY && (
+                          <span className="text-green-400 text-[10px] font-medium">+{EXP_AI_CLICK} EXP</span>
+                        )}
+                      </motion.button>
                       <motion.button
                         className="w-full py-2 px-3 rounded-lg bg-white/5 text-xs text-slate-400 text-left flex items-center gap-2"
                         whileHover={{ scale: 1.02 }}
@@ -1318,6 +1552,9 @@ function MainContent() {
         if (parsed.totalExp === undefined) {
           parsed.totalExp = 0
         }
+        // 레벨 동기화
+        parsed.level = Math.floor(parsed.totalExp / EXP_PER_LEVEL) + 1
+        parsed.exp = parsed.totalExp % EXP_PER_LEVEL
         setUserData(parsed)
       } catch {
         setShowOnboarding(true)
