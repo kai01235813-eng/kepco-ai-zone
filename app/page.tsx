@@ -29,6 +29,7 @@ import {
   Settings,
   RotateCcw,
   AlertTriangle,
+  Youtube,
 } from 'lucide-react'
 
 // ==================== Types ====================
@@ -1073,6 +1074,86 @@ const ExpAccordion = ({ aiClickCount }: { aiClickCount: number }) => {
   )
 }
 
+// ==================== Intro Video Modal ====================
+const IntroVideoModal = ({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean
+  onClose: () => void
+}) => {
+  const handleVideoEnd = () => {
+    onClose()
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-[600] flex items-center justify-center p-4"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        {/* Backdrop */}
+        <motion.div
+          className="absolute inset-0 bg-black/90 backdrop-blur-md"
+          onClick={onClose}
+        />
+
+        {/* Video Container */}
+        <motion.div
+          className="relative w-full max-w-2xl z-10"
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.8, opacity: 0 }}
+          transition={springConfig}
+        >
+          {/* Neon Border Effect */}
+          <div className="absolute -inset-1 bg-gradient-to-r from-kepco-blue via-kepco-cyan to-kepco-blue rounded-2xl blur-sm opacity-75" />
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-kepco-blue via-kepco-cyan to-kepco-blue rounded-2xl opacity-50" />
+
+          {/* Video Wrapper */}
+          <div className="relative bg-deep-navy rounded-2xl overflow-hidden">
+            {/* Close Button */}
+            <motion.button
+              onClick={onClose}
+              className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-black/50 flex items-center justify-center text-white hover:bg-black/70 transition-colors"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+            >
+              <X className="w-5 h-5" />
+            </motion.button>
+
+            {/* Video Player */}
+            <video
+              className="w-full aspect-video"
+              autoPlay
+              controls
+              onEnded={handleVideoEnd}
+              playsInline
+            >
+              <source src="/videos/intro.mp4" type="video/mp4" />
+              브라우저가 비디오를 지원하지 않습니다.
+            </video>
+          </div>
+
+          {/* Title */}
+          <motion.p
+            className="text-center text-slate-400 text-sm mt-4"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            KEPCO AI ZONE 소개 영상
+          </motion.p>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  )
+}
+
 // ==================== Onboarding Screen ====================
 const OnboardingScreen = ({
   onComplete,
@@ -1082,6 +1163,7 @@ const OnboardingScreen = ({
   const [nickname, setNickname] = useState('')
   const [selectedCharacter, setSelectedCharacter] = useState<number | null>(null)
   const [step, setStep] = useState<'nickname' | 'character'>('nickname')
+  const [showIntroVideo, setShowIntroVideo] = useState(false)
 
   const handleSubmit = () => {
     if (nickname.trim() && selectedCharacter) {
@@ -1107,6 +1189,12 @@ const OnboardingScreen = ({
       variants={pageTransition}
       transition={{ duration: 0.5 }}
     >
+      {/* Intro Video Modal */}
+      <IntroVideoModal
+        isOpen={showIntroVideo}
+        onClose={() => setShowIntroVideo(false)}
+      />
+
       {/* Background Effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <motion.div
@@ -1137,6 +1225,29 @@ const OnboardingScreen = ({
         </motion.div>
         <h1 className="text-3xl font-bold text-gradient mb-2">KEPCO AI ZONE</h1>
         <p className="text-slate-400 text-sm">경남본부 AI 혁신 플랫폼</p>
+
+        {/* YouTube Intro Button */}
+        <motion.button
+          className="mt-4 flex items-center gap-2 mx-auto px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+          onClick={() => setShowIntroVideo(true)}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          {/* YouTube Icon with Glow */}
+          <motion.div
+            className="relative"
+            animate={{ scale: [1, 1.1, 1] }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            {/* Glow Effect */}
+            <div className="absolute inset-0 bg-[#FF0000] rounded-full blur-md opacity-50" />
+            <Youtube className="w-6 h-6 text-[#FF0000] relative z-10" />
+          </motion.div>
+          <span className="text-sm text-slate-300">인트로 영상 보기</span>
+        </motion.button>
       </motion.div>
 
       <AnimatePresence mode="wait">
