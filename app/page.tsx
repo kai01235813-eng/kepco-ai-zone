@@ -18,10 +18,14 @@ import {
   Rocket,
   Construction,
   MapPin,
-  Clock,
   Check,
   X,
   CalendarCheck,
+  Gift,
+  Target,
+  Clock,
+  TestTube,
+  Crown,
 } from 'lucide-react'
 
 // ==================== Types ====================
@@ -31,6 +35,7 @@ interface UserData {
   level: number
   exp: number
   badges: number
+  totalExp: number
 }
 
 interface CheckInRecord {
@@ -64,11 +69,17 @@ const CHARACTERS: Character[] = [
 
 const STORAGE_KEY = 'kepco_ai_zone_user'
 const CHECKIN_HISTORY_KEY = 'checkInHistory'
+const TEST_MODE_KEY = 'kepco_test_mode'
 
 // GPS 설정 - 한전 경남본부 좌표 (필요시 수정)
-const TARGET_LAT = 35.1795 // 위도
-const TARGET_LNG = 129.0756 // 경도
-const ALLOWED_RADIUS = 100 // 미터
+const TARGET_LAT = 35.1795
+const TARGET_LNG = 129.0756
+const ALLOWED_RADIUS = 100
+
+// EXP 설정
+const EXP_NFC = 20
+const EXP_GPS = 10
+const EXP_PER_LEVEL = 100
 
 // 타임슬롯 설정
 const TIME_SLOTS: { id: TimeSlot; name: string; startHour: number; endHour: number; icon: string }[] = [
@@ -109,7 +120,8 @@ const getTodayKey = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
-const getCurrentTimeSlot = (): TimeSlot | null => {
+const getCurrentTimeSlot = (testMode: boolean = false): TimeSlot | null => {
+  if (testMode) return 'morning' // 테스트 모드에서는 항상 출석 가능
   const hour = new Date().getHours()
   for (const slot of TIME_SLOTS) {
     if (hour >= slot.startHour && hour < slot.endHour) {
@@ -130,16 +142,14 @@ const saveCheckInHistory = (history: CheckInHistory) => {
 }
 
 const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-  const R = 6371e3 // 지구 반경 (미터)
+  const R = 6371e3
   const φ1 = (lat1 * Math.PI) / 180
   const φ2 = (lat2 * Math.PI) / 180
   const Δφ = ((lat2 - lat1) * Math.PI) / 180
   const Δλ = ((lng2 - lng1) * Math.PI) / 180
-
   const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
     Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2)
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-
   return R * c
 }
 
@@ -148,15 +158,12 @@ const GlassCard = ({
   children,
   className = '',
   onClick,
-  layoutId,
 }: {
   children: React.ReactNode
   className?: string
   onClick?: () => void
-  layoutId?: string
 }) => (
   <motion.div
-    layoutId={layoutId}
     className={`glass rounded-2xl overflow-hidden ${className}`}
     onClick={onClick}
     whileHover={{ scale: 1.02, y: -2 }}
@@ -196,6 +203,99 @@ const GradientButton = ({
   </motion.button>
 )
 
+// ==================== Test Mode Toggle ====================
+const TestModeToggle = ({
+  testMode,
+  onToggle,
+}: {
+  testMode: boolean
+  onToggle: () => void
+}) => (
+  <motion.button
+    className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium ${
+      testMode
+        ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50'
+        : 'bg-white/5 text-slate-500 border border-white/10'
+    }`}
+    onClick={onToggle}
+    whileHover={{ scale: 1.05 }}
+    whileTap={{ scale: 0.95 }}
+  >
+    <TestTube className="w-4 h-4" />
+    {testMode ? 'TEST ON' : 'TEST'}
+  </motion.button>
+)
+
+// ==================== Golden Pass Animation ====================
+const GoldenPassAnimation = ({ show }: { show: boolean }) => {
+  if (!show) return null
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      {/* Golden particles */}
+      {[...Array(20)].map((_, i) => (
+        <motion.div
+          key={i}
+          className="absolute w-2 h-2 bg-yellow-400 rounded-full"
+          initial={{
+            x: 0,
+            y: 0,
+            scale: 0,
+            opacity: 1,
+          }}
+          animate={{
+            x: (Math.random() - 0.5) * 300,
+            y: (Math.random() - 0.5) * 300,
+            scale: [0, 1, 0],
+            opacity: [1, 1, 0],
+          }}
+          transition={{
+            duration: 1.5,
+            delay: i * 0.05,
+            ease: 'easeOut',
+          }}
+        />
+      ))}
+
+      {/* Main text */}
+      <motion.div
+        className="text-center"
+        initial={{ scale: 0, rotate: -10 }}
+        animate={{ scale: [0, 1.2, 1], rotate: [10, -5, 0] }}
+        transition={{ duration: 0.6, ease: 'easeOut' }}
+      >
+        <motion.div
+          className="flex items-center justify-center gap-3 mb-2"
+          animate={{ y: [0, -10, 0] }}
+          transition={{ duration: 1, repeat: 3 }}
+        >
+          <Crown className="w-12 h-12 text-yellow-400" />
+        </motion.div>
+        <motion.h2
+          className="text-4xl font-black bg-gradient-to-r from-yellow-300 via-yellow-400 to-orange-500 bg-clip-text text-transparent"
+          animate={{ scale: [1, 1.05, 1] }}
+          transition={{ duration: 0.5, repeat: 5 }}
+        >
+          GOLDEN PASS
+        </motion.h2>
+        <motion.p
+          className="text-yellow-400/80 text-lg mt-2"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          +{EXP_NFC} EXP 하이패스 보너스!
+        </motion.p>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 // ==================== Check-In Modal ====================
 const CheckInModal = ({
   isOpen,
@@ -204,39 +304,44 @@ const CheckInModal = ({
   userData,
   onCheckInSuccess,
   selectedCharacter,
+  testMode,
 }: {
   isOpen: boolean
   onClose: () => void
   isNFC: boolean
   userData: UserData
-  onCheckInSuccess: (points: number) => void
+  onCheckInSuccess: (exp: number, isNFC: boolean) => void
   selectedCharacter: Character | undefined
+  testMode: boolean
 }) => {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'no-slot' | 'already'>('idle')
   const [message, setMessage] = useState('')
-  const [earnedPoints, setEarnedPoints] = useState(0)
+  const [earnedExp, setEarnedExp] = useState(0)
   const [showBubble, setShowBubble] = useState(false)
+  const [showGoldenPass, setShowGoldenPass] = useState(false)
 
-  const currentSlot = getCurrentTimeSlot()
+  const currentSlot = getCurrentTimeSlot(testMode)
   const currentSlotInfo = TIME_SLOTS.find(s => s.id === currentSlot)
-  const todayKey = getTodayKey()
+  const todayKey = testMode ? `test-${Date.now()}` : getTodayKey()
   const history = getCheckInHistory()
-  const todayRecord = history[todayKey] || { morning: false, lunch: false, evening: false }
+  const todayRecord = testMode ? { morning: false, lunch: false, evening: false } : (history[todayKey] || { morning: false, lunch: false, evening: false })
 
   const triggerVibration = () => {
     if (navigator.vibrate) {
-      navigator.vibrate([100, 50, 100]) // 지잉, 지잉
+      navigator.vibrate(isNFC ? [100, 50, 100, 50, 100] : [100, 50, 100])
     }
   }
 
   const performCheckIn = async (viaGPS: boolean = false) => {
-    if (!currentSlot) {
+    if (!currentSlot && !testMode) {
       setStatus('no-slot')
       setMessage('현재는 출석 가능 시간이 아닙니다')
       return
     }
 
-    if (todayRecord[currentSlot]) {
+    const checkSlot = currentSlot || 'morning'
+
+    if (todayRecord[checkSlot] && !testMode) {
       setStatus('already')
       setMessage('이미 이 시간대에 출석하셨습니다')
       return
@@ -244,8 +349,8 @@ const CheckInModal = ({
 
     setStatus('loading')
 
-    if (viaGPS && !isNFC) {
-      // GPS 인증
+    // GPS 인증 (NFC가 아닌 경우)
+    if (viaGPS && !isNFC && !testMode) {
       try {
         const position = await new Promise<GeolocationPosition>((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -275,32 +380,39 @@ const CheckInModal = ({
     }
 
     // 출석 성공 처리
-    const points = isNFC ? 15 : 10
-    setEarnedPoints(points)
+    const exp = isNFC ? EXP_NFC : EXP_GPS
+    setEarnedExp(exp)
 
-    // 히스토리 업데이트
-    const newHistory = {
-      ...history,
-      [todayKey]: {
-        ...todayRecord,
-        [currentSlot]: true,
-      },
+    // NFC 골든 패스 애니메이션
+    if (isNFC) {
+      setShowGoldenPass(true)
+      setTimeout(() => setShowGoldenPass(false), 2500)
     }
-    saveCheckInHistory(newHistory)
+
+    // 히스토리 업데이트 (테스트 모드가 아닌 경우만)
+    if (!testMode) {
+      const newHistory = {
+        ...history,
+        [todayKey]: {
+          ...todayRecord,
+          [checkSlot]: true,
+        },
+      }
+      saveCheckInHistory(newHistory)
+    }
 
     // 유저 데이터 업데이트
-    onCheckInSuccess(points)
+    onCheckInSuccess(exp, isNFC)
 
     setStatus('success')
-    setMessage(isNFC ? 'NFC 인증 성공!' : 'GPS 인증 성공!')
+    setMessage(isNFC ? '🏆 GOLDEN PASS!' : '📍 GPS 인증 성공!')
     triggerVibration()
 
-    setTimeout(() => setShowBubble(true), 500)
+    setTimeout(() => setShowBubble(true), isNFC ? 2000 : 500)
   }
 
   useEffect(() => {
     if (isOpen && isNFC && status === 'idle') {
-      // NFC 접속 시 자동 출석
       performCheckIn(false)
     }
   }, [isOpen, isNFC])
@@ -310,6 +422,7 @@ const CheckInModal = ({
       setStatus('idle')
       setMessage('')
       setShowBubble(false)
+      setShowGoldenPass(false)
     }
   }, [isOpen])
 
@@ -323,19 +436,20 @@ const CheckInModal = ({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
       >
+        {/* Golden Pass Animation */}
+        <GoldenPassAnimation show={showGoldenPass} />
+
         {/* Backdrop */}
         <motion.div
           className="absolute inset-0 bg-black/70 backdrop-blur-sm"
           onClick={onClose}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
         />
 
         {/* Modal Content */}
         <motion.div
           className={`relative w-full max-w-sm rounded-3xl p-6 overflow-hidden ${
             status === 'success' && isNFC
-              ? 'bg-gradient-to-br from-yellow-500/20 via-pink-500/20 to-cyan-500/20'
+              ? 'bg-gradient-to-br from-yellow-500/20 via-orange-500/20 to-pink-500/20 border border-yellow-500/30'
               : 'glass-strong'
           }`}
           initial={{ scale: 0.8, y: 50 }}
@@ -347,12 +461,19 @@ const CheckInModal = ({
           {status === 'success' && isNFC && (
             <motion.div
               className="absolute inset-0 pointer-events-none"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: [0, 1, 0.5, 1] }}
+              animate={{ opacity: [0.3, 0.6, 0.3] }}
               transition={{ duration: 2, repeat: Infinity }}
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-red-500/30 via-yellow-500/30 via-green-500/30 via-blue-500/30 to-purple-500/30 animate-pulse" />
+              <div className="absolute inset-0 bg-gradient-to-r from-yellow-500/20 via-orange-500/20 to-pink-500/20" />
             </motion.div>
+          )}
+
+          {/* Test Mode Badge */}
+          {testMode && (
+            <div className="absolute top-4 left-4 px-2 py-1 bg-yellow-500/20 rounded-full text-xs text-yellow-400 flex items-center gap-1">
+              <TestTube className="w-3 h-3" />
+              테스트 모드
+            </div>
           )}
 
           {/* Close Button */}
@@ -364,23 +485,23 @@ const CheckInModal = ({
           </button>
 
           {/* Header */}
-          <div className="text-center mb-6 relative z-10">
+          <div className="text-center mb-6 relative z-10 mt-4">
             <motion.div
               className={`w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center ${
-                status === 'success' && isNFC
+                isNFC
                   ? 'bg-gradient-to-br from-yellow-400 to-orange-500'
                   : 'bg-gradient-to-br from-kepco-blue to-kepco-cyan'
               }`}
               animate={status === 'success' ? { rotate: [0, 10, -10, 0], scale: [1, 1.1, 1] } : {}}
               transition={{ duration: 0.5, repeat: status === 'success' ? 3 : 0 }}
             >
-              <CalendarCheck className="w-8 h-8 text-white" />
+              {isNFC ? <Crown className="w-8 h-8 text-white" /> : <CalendarCheck className="w-8 h-8 text-white" />}
             </motion.div>
             <h2 className="text-2xl font-bold mb-1">
-              {isNFC ? '🏆 NFC 출석' : '📍 GPS 출석'}
+              {isNFC ? '🏆 NFC 하이패스' : '📍 GPS 출석'}
             </h2>
             <p className="text-slate-400 text-sm">
-              {currentSlotInfo ? `${currentSlotInfo.icon} ${currentSlotInfo.name} 시간대` : '출석 가능 시간 확인'}
+              {isNFC ? `+${EXP_NFC} EXP 보너스!` : currentSlotInfo ? `${currentSlotInfo.icon} ${currentSlotInfo.name} 시간대` : '출석 가능 시간 확인'}
             </p>
           </div>
 
@@ -396,7 +517,7 @@ const CheckInModal = ({
                   whileTap={{ scale: 0.98 }}
                 >
                   <MapPin className="w-5 h-5" />
-                  GPS 인증하기
+                  GPS 인증하기 (+{EXP_GPS} EXP)
                 </motion.button>
               </div>
             )}
@@ -404,22 +525,23 @@ const CheckInModal = ({
             {status === 'loading' && (
               <div className="text-center py-8">
                 <motion.div
-                  className="w-12 h-12 mx-auto border-4 border-kepco-cyan/30 border-t-kepco-cyan rounded-full"
+                  className={`w-12 h-12 mx-auto border-4 rounded-full ${
+                    isNFC ? 'border-yellow-400/30 border-t-yellow-400' : 'border-kepco-cyan/30 border-t-kepco-cyan'
+                  }`}
                   animate={{ rotate: 360 }}
                   transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                 />
-                <p className="text-slate-400 mt-4">위치 확인 중...</p>
+                <p className="text-slate-400 mt-4">{isNFC ? 'NFC 인증 중...' : '위치 확인 중...'}</p>
               </div>
             )}
 
-            {status === 'success' && (
+            {status === 'success' && !showGoldenPass && (
               <motion.div
                 className="text-center"
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={springConfig}
               >
-                {/* Success Animation */}
                 <motion.div
                   className={`w-20 h-20 mx-auto mb-4 rounded-full flex items-center justify-center ${
                     isNFC
@@ -433,10 +555,9 @@ const CheckInModal = ({
                   <Check className="w-10 h-10 text-white" />
                 </motion.div>
 
-                {/* Success Message */}
                 <motion.h3
                   className={`text-2xl font-bold mb-2 ${
-                    isNFC ? 'text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400' : 'text-green-400'
+                    isNFC ? 'text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-pink-400' : 'text-green-400'
                   }`}
                   animate={isNFC ? { scale: [1, 1.05, 1] } : {}}
                   transition={{ duration: 1, repeat: Infinity }}
@@ -451,8 +572,7 @@ const CheckInModal = ({
                   transition={{ delay: 0.3 }}
                 >
                   <Zap className={isNFC ? 'text-yellow-400' : 'text-kepco-cyan'} />
-                  <span className="font-bold">+{earnedPoints}점 적립!</span>
-                  {isNFC && <span className="text-xs text-yellow-400 ml-1">(NFC 보너스 +5)</span>}
+                  <span className="font-bold">+{earnedExp} EXP 적립!</span>
                 </motion.div>
 
                 {/* Character Bubble */}
@@ -479,10 +599,9 @@ const CheckInModal = ({
                         animate={{ scale: 1 }}
                         transition={{ delay: 0.2, ...springConfig }}
                       >
-                        <p className="text-sm font-medium">출석 완료! 에너지 충전! ⚡</p>
-                        <div className="absolute bottom-0 left-0 w-3 h-3 bg-white/10 transform -translate-x-1/2"
-                          style={{ clipPath: 'polygon(100% 0, 100% 100%, 0 0)' }}
-                        />
+                        <p className="text-sm font-medium">
+                          {isNFC ? '골든 패스 발동! 최고야! 🌟' : '출석 완료! 에너지 충전! ⚡'}
+                        </p>
                       </motion.div>
                     </motion.div>
                   )}
@@ -531,11 +650,84 @@ const CheckInModal = ({
               ))}
             </div>
           </div>
+
+          {/* EXP Info */}
+          <div className="mt-4 pt-4 border-t border-white/10">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-500">NFC 하이패스</span>
+              <span className="text-yellow-400 font-medium">+{EXP_NFC} EXP</span>
+            </div>
+            <div className="flex justify-between text-xs mt-1">
+              <span className="text-slate-500">GPS 인증</span>
+              <span className="text-kepco-cyan font-medium">+{EXP_GPS} EXP</span>
+            </div>
+          </div>
         </motion.div>
       </motion.div>
     </AnimatePresence>
   )
 }
+
+// ==================== Mission Card ====================
+const MissionCard = () => (
+  <motion.div variants={fadeInUp} className="mb-4">
+    <GlassCard className="p-5">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+          <Target className="w-5 h-5 text-white" />
+        </div>
+        <div>
+          <h3 className="font-semibold">EXP 획득 방법</h3>
+          <p className="text-slate-400 text-xs">미션을 완료하고 레벨업하세요!</p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {/* NFC */}
+        <div className="flex items-center justify-between p-3 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-xl border border-yellow-500/20">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-yellow-500/20 flex items-center justify-center">
+              <Crown className="w-4 h-4 text-yellow-400" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-yellow-400">NFC 키링 태그</p>
+              <p className="text-xs text-slate-500">하이패스 보너스</p>
+            </div>
+          </div>
+          <span className="text-lg font-bold text-yellow-400">+{EXP_NFC}</span>
+        </div>
+
+        {/* GPS */}
+        <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-kepco-cyan/20 flex items-center justify-center">
+              <MapPin className="w-4 h-4 text-kepco-cyan" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">일반 GPS 인증</p>
+              <p className="text-xs text-slate-500">위치 확인 출석</p>
+            </div>
+          </div>
+          <span className="text-lg font-bold text-kepco-cyan">+{EXP_GPS}</span>
+        </div>
+
+        {/* Game - Coming Soon */}
+        <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10 opacity-50">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
+              <Gamepad2 className="w-4 h-4 text-purple-400" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-400">게임 참여</p>
+              <p className="text-xs text-slate-500">추후 업데이트</p>
+            </div>
+          </div>
+          <span className="text-xs text-slate-500 bg-white/5 px-2 py-1 rounded-full">COMING</span>
+        </div>
+      </div>
+    </GlassCard>
+  </motion.div>
+)
 
 // ==================== Onboarding Screen ====================
 const OnboardingScreen = ({
@@ -555,6 +747,7 @@ const OnboardingScreen = ({
         level: 1,
         exp: 0,
         badges: 0,
+        totalExp: 0,
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(userData))
       onComplete(userData)
@@ -619,10 +812,7 @@ const OnboardingScreen = ({
                 <p className="text-slate-400 text-sm">닉네임을 입력해주세요</p>
               </div>
 
-              <motion.div
-                className="relative mb-6"
-                whileFocus={{ scale: 1.02 }}
-              >
+              <div className="relative mb-6">
                 <input
                   type="text"
                   value={nickname}
@@ -643,7 +833,7 @@ const OnboardingScreen = ({
                   animate={{ width: nickname ? '100%' : '0%' }}
                   transition={{ duration: 0.3 }}
                 />
-              </motion.div>
+              </div>
 
               <GradientButton
                 onClick={() => setStep('character')}
@@ -743,35 +933,40 @@ const OnboardingScreen = ({
 const DashboardScreen = ({
   userData,
   onUpdateUserData,
-  isNFCAccess
+  isNFCAccess,
+  testMode,
+  onToggleTestMode,
 }: {
   userData: UserData
   onUpdateUserData: (data: UserData) => void
   isNFCAccess: boolean
+  testMode: boolean
+  onToggleTestMode: () => void
 }) => {
   const [expandedCard, setExpandedCard] = useState<string | null>(null)
   const [showCheckInModal, setShowCheckInModal] = useState(false)
   const selectedCharacter = CHARACTERS.find((c) => c.id === userData.characterId)
 
-  const expPercent = (userData.exp / 100) * 100 // 100 exp per level
+  const expPercent = (userData.exp / EXP_PER_LEVEL) * 100
 
   const toggleCard = (cardId: string) => {
     setExpandedCard(expandedCard === cardId ? null : cardId)
   }
 
-  const handleCheckInSuccess = (points: number) => {
-    const newExp = userData.exp + points
-    const levelUps = Math.floor(newExp / 100)
+  const handleCheckInSuccess = (exp: number) => {
+    const newTotalExp = (userData.totalExp || 0) + exp
+    const newExp = userData.exp + exp
+    const levelUps = Math.floor(newExp / EXP_PER_LEVEL)
     const updatedData: UserData = {
       ...userData,
-      exp: newExp % 100,
+      exp: newExp % EXP_PER_LEVEL,
       level: userData.level + levelUps,
+      totalExp: newTotalExp,
     }
     onUpdateUserData(updatedData)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData))
   }
 
-  // NFC 접속 시 자동으로 모달 열기
   useEffect(() => {
     if (isNFCAccess) {
       setShowCheckInModal(true)
@@ -786,6 +981,9 @@ const DashboardScreen = ({
       variants={pageTransition}
       transition={{ duration: 0.5 }}
     >
+      {/* Test Mode Toggle */}
+      <TestModeToggle testMode={testMode} onToggle={onToggleTestMode} />
+
       {/* Background Effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-kepco-blue/10 rounded-full blur-3xl" />
@@ -818,7 +1016,6 @@ const DashboardScreen = ({
         transition={{ delay: 0.2 }}
       >
         <div className="flex items-center gap-4">
-          {/* Character Orb */}
           <motion.div
             className="character-orb w-20 h-20 flex-shrink-0"
             animate={{ y: [0, -5, 0] }}
@@ -837,7 +1034,6 @@ const DashboardScreen = ({
             </div>
           </motion.div>
 
-          {/* User Info */}
           <div className="flex-1">
             <motion.h2
               className="text-xl font-bold text-white mb-1"
@@ -866,7 +1062,7 @@ const DashboardScreen = ({
         initial="initial"
         animate="animate"
       >
-        {/* MY PAGE Card - Large */}
+        {/* MY PAGE Card */}
         <motion.div variants={fadeInUp} className="mb-4">
           <GlassCard className="p-5">
             <div className="flex items-start justify-between mb-4">
@@ -892,17 +1088,15 @@ const DashboardScreen = ({
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-3">
-              {/* Level */}
               <div className="bg-white/5 rounded-xl p-3 text-center">
                 <div className="text-2xl font-bold text-kepco-cyan">Lv.{userData.level}</div>
                 <div className="text-xs text-slate-400">레벨</div>
               </div>
 
-              {/* EXP */}
               <div className="bg-white/5 rounded-xl p-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-slate-400">EXP</span>
-                  <span className="text-xs text-kepco-cyan">{userData.exp}/100</span>
+                  <span className="text-xs text-kepco-cyan">{userData.exp}/{EXP_PER_LEVEL}</span>
                 </div>
                 <div className="h-2 bg-white/10 rounded-full overflow-hidden">
                   <motion.div
@@ -914,7 +1108,6 @@ const DashboardScreen = ({
                 </div>
               </div>
 
-              {/* Badges */}
               <div className="bg-white/5 rounded-xl p-3 text-center">
                 <div className="flex items-center justify-center gap-1">
                   <Trophy className="w-5 h-5 text-yellow-500" />
@@ -923,10 +1116,19 @@ const DashboardScreen = ({
                 <div className="text-xs text-slate-400">뱃지</div>
               </div>
             </div>
+
+            {/* Total EXP */}
+            <div className="mt-3 pt-3 border-t border-white/10 flex justify-between items-center">
+              <span className="text-xs text-slate-500">누적 EXP</span>
+              <span className="text-sm font-medium text-kepco-cyan">{userData.totalExp || 0} EXP</span>
+            </div>
           </GlassCard>
         </motion.div>
 
-        {/* Bottom Row - Two Square Cards */}
+        {/* Mission Card */}
+        <MissionCard />
+
+        {/* Bottom Row */}
         <div className="grid grid-cols-2 gap-4">
           {/* AI App Card */}
           <motion.div variants={fadeInUp}>
@@ -968,13 +1170,6 @@ const DashboardScreen = ({
                       >
                         <Construction className="w-3 h-3" /> 개발중
                       </motion.button>
-                      <motion.button
-                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-xs text-slate-400 text-left flex items-center gap-2"
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Construction className="w-3 h-3" /> 개발중
-                      </motion.button>
                     </div>
                   </motion.div>
                 )}
@@ -1000,7 +1195,7 @@ const DashboardScreen = ({
               </div>
               <h3 className="font-semibold mb-1">GAME</h3>
               <p className="text-xs text-slate-400 mb-1">보상을 통한 에너지 학습</p>
-              <p className="text-[10px] text-kepco-cyan">참여 시 마일리지 적립</p>
+              <p className="text-[10px] text-kepco-cyan">참여 시 EXP 적립</p>
 
               <AnimatePresence>
                 {expandedCard === 'game' && (
@@ -1012,13 +1207,6 @@ const DashboardScreen = ({
                     className="overflow-hidden"
                   >
                     <div className="space-y-2 pt-2 border-t border-white/10">
-                      <motion.button
-                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-xs text-slate-400 text-left flex items-center gap-2"
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Construction className="w-3 h-3" /> 개발중
-                      </motion.button>
                       <motion.button
                         className="w-full py-2 px-3 rounded-lg bg-white/5 text-xs text-slate-400 text-left flex items-center gap-2"
                         whileHover={{ scale: 1.02 }}
@@ -1064,12 +1252,13 @@ const DashboardScreen = ({
         userData={userData}
         onCheckInSuccess={handleCheckInSuccess}
         selectedCharacter={selectedCharacter}
+        testMode={testMode}
       />
     </motion.div>
   )
 }
 
-// Navigation Button Component
+// ==================== Navigation Button ====================
 const NavButton = ({
   icon,
   label,
@@ -1105,6 +1294,7 @@ function MainContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [isNFCAccess, setIsNFCAccess] = useState(false)
+  const [testMode, setTestMode] = useState(false)
 
   useEffect(() => {
     // NFC 접속 확인
@@ -1113,11 +1303,21 @@ function MainContent() {
       setIsNFCAccess(true)
     }
 
+    // 테스트 모드 확인
+    const savedTestMode = localStorage.getItem(TEST_MODE_KEY)
+    if (savedTestMode === 'true') {
+      setTestMode(true)
+    }
+
     // Check localStorage for existing user
     const storedData = localStorage.getItem(STORAGE_KEY)
     if (storedData) {
       try {
         const parsed = JSON.parse(storedData)
+        // totalExp가 없으면 초기화
+        if (parsed.totalExp === undefined) {
+          parsed.totalExp = 0
+        }
         setUserData(parsed)
       } catch {
         setShowOnboarding(true)
@@ -1135,6 +1335,14 @@ function MainContent() {
 
   const handleUpdateUserData = useCallback((data: UserData) => {
     setUserData(data)
+  }, [])
+
+  const handleToggleTestMode = useCallback(() => {
+    setTestMode(prev => {
+      const newValue = !prev
+      localStorage.setItem(TEST_MODE_KEY, String(newValue))
+      return newValue
+    })
   }, [])
 
   if (isLoading) {
@@ -1162,6 +1370,8 @@ function MainContent() {
           userData={userData}
           onUpdateUserData={handleUpdateUserData}
           isNFCAccess={isNFCAccess}
+          testMode={testMode}
+          onToggleTestMode={handleToggleTestMode}
         />
       )}
     </AnimatePresence>
