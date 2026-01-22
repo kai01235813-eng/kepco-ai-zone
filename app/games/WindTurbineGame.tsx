@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Zap, Wind, Trophy, BookOpen, AlertTriangle, Flame, Award } from 'lucide-react'
+import { X, Zap, Wind, Trophy, BookOpen, AlertTriangle, Flame, Award, Hand } from 'lucide-react'
 
 // ==================== Types ====================
 interface WindTurbineGameProps {
@@ -18,25 +18,39 @@ interface Spark {
   angle: number
 }
 
+interface WindParticle {
+  id: number
+  y: number
+  delay: number
+}
+
 interface GameStats {
   totalSpins: number
   maxRpm: number
   maxCombo: number
   deviations: number
-  comboTime: number
+  windBoostUsage: number // 바람 이벤트 활용도 (0~100%)
+  totalMWh: number
 }
 
 // ==================== Constants ====================
 const GAME_DURATION = 60
-const FRICTION = 0.92 // 더 강한 마찰력 (0.985 -> 0.92)
+const FRICTION = 0.93
 const MIN_RPM_FOR_COMBO = 50
-const SPINS_PER_EXP = 1000 // 1000바퀴당 1 EXP
-const COMBO_ZONE_THRESHOLD = 70 // RPM 70% 이상이면 콤보 존
+const SPINS_PER_EXP = 1000
+const COMBO_ZONE_THRESHOLD = 70
 const MAX_RPM = 250
 
-// 스와이프 트랙 설정
-const TRACK_INNER_RADIUS = 25 // %
-const TRACK_OUTER_RADIUS = 48 // %
+// 트랙 설정 - 날개 끝과 동기화
+const BLADE_LENGTH_PERCENT = 38 // 날개 길이 (중심에서 %)
+const TRACK_WIDTH = 12 // 트랙 두께 (%)
+const TRACK_RADIUS = BLADE_LENGTH_PERCENT // 트랙 반경 = 날개 끝
+
+// 바람 이벤트 설정
+const WIND_EVENT_MIN_TIME = 10 // 시작 후 최소 10초
+const WIND_EVENT_MAX_TIME = 50 // 종료 10초 전까지
+const WIND_EVENT_DURATION = 5 // 5초간 지속
+const WIND_BOOST_MULTIPLIER = 2 // RPM 효율 2배
 
 const COMBO_TIERS = [
   { time: 50, multiplier: 3, color: '#EF4444', name: 'OVERLOAD!', glow: true },
@@ -46,13 +60,15 @@ const COMBO_TIERS = [
 
 // 칭호 시스템
 const getTitleByStats = (stats: GameStats): { title: string; rank: string; color: string } => {
-  const score = stats.totalSpins * (1 + stats.maxCombo * 0.01) - stats.deviations * 10
+  const score = stats.totalSpins * (1 + stats.maxCombo * 0.01) - stats.deviations * 10 + stats.windBoostUsage
 
-  if (score >= 500 && stats.deviations <= 2) {
+  if (score >= 600 && stats.deviations <= 2 && stats.windBoostUsage >= 80) {
+    return { title: '바람의 지배자', rank: '상위 0.1%', color: '#FF6B6B' }
+  } else if (score >= 400 && stats.deviations <= 3) {
     return { title: '전설의 발전기 마스터', rank: '상위 1%', color: '#FFD700' }
-  } else if (score >= 300 && stats.deviations <= 5) {
+  } else if (score >= 250 && stats.deviations <= 5) {
     return { title: '숙련된 운전원', rank: '상위 10%', color: '#C0C0C0' }
-  } else if (score >= 150) {
+  } else if (score >= 100) {
     return { title: '유망한 신입', rank: '상위 30%', color: '#CD7F32' }
   } else {
     return { title: '견습 운전원', rank: '열심히 하세요!', color: '#00D4FF' }
@@ -76,13 +92,25 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
   const [deviationFlash, setDeviationFlash] = useState(false)
   const [goldenGlow, setGoldenGlow] = useState(false)
 
+  // 시작 가이드
+  const [showStartGuide, setShowStartGuide] = useState(true)
+  const [hasStartedDragging, setHasStartedDragging] = useState(false)
+
+  // 바람 이벤트
+  const [windEventActive, setWindEventActive] = useState(false)
+  const [windEventUsed, setWindEventUsed] = useState(false)
+  const [windEventTime, setWindEventTime] = useState<number | null>(null)
+  const [windParticles, setWindParticles] = useState<WindParticle[]>([])
+  const [windBoostSpins, setWindBoostSpins] = useState(0)
+
   // Stats tracking
   const [gameStats, setGameStats] = useState<GameStats>({
     totalSpins: 0,
     maxRpm: 0,
     maxCombo: 0,
     deviations: 0,
-    comboTime: 0,
+    windBoostUsage: 0,
+    totalMWh: 0,
   })
 
   // Refs
@@ -94,6 +122,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
   const totalRotationRef = useRef(0)
   const isInTrackRef = useRef(true)
   const comboCountRef = useRef(0)
+  const windBoostSpinsRef = useRef(0)
 
   // Get current combo tier
   const getCurrentComboTier = useCallback(() => {
@@ -116,10 +145,12 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     return (distance / maxDistance) * 100
   }, [])
 
-  // Check if position is within track
+  // Check if position is within track (날개 끝 반경과 동기화)
   const isWithinTrack = useCallback((clientX: number, clientY: number) => {
     const distance = getDistanceFromCenter(clientX, clientY)
-    return distance >= TRACK_INNER_RADIUS && distance <= TRACK_OUTER_RADIUS
+    const innerRadius = TRACK_RADIUS - TRACK_WIDTH / 2
+    const outerRadius = TRACK_RADIUS + TRACK_WIDTH / 2
+    return distance >= innerRadius && distance <= outerRadius
   }, [getDistanceFromCenter])
 
   // Calculate angle from touch/mouse position
@@ -142,15 +173,15 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     comboCountRef.current = 0
     setGoldenGlow(false)
 
-    // 감점: 회전수 5% 감소
+    // 감점: 회전수 5% 감소 + RPM 급격히 감소
     totalRotationRef.current = Math.max(0, totalRotationRef.current * 0.95)
+    velocityRef.current *= 0.3 // RPM 급격히 감소
 
     // 진동 피드백
     if (navigator.vibrate) {
       navigator.vibrate([50, 30, 50, 30, 100])
     }
 
-    // Stats 업데이트
     setGameStats(prev => ({ ...prev, deviations: prev.deviations + 1 }))
 
     setTimeout(() => {
@@ -163,6 +194,12 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
   const handleStart = useCallback((clientX: number, clientY: number) => {
     if (gameState !== 'playing') return
 
+    // 첫 드래그 시 가이드 숨김
+    if (!hasStartedDragging) {
+      setHasStartedDragging(true)
+      setShowStartGuide(false)
+    }
+
     if (!isWithinTrack(clientX, clientY)) {
       isInTrackRef.current = false
       return
@@ -170,17 +207,15 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
 
     isInTrackRef.current = true
     lastAngleRef.current = getAngleFromCenter(clientX, clientY)
-  }, [gameState, getAngleFromCenter, isWithinTrack])
+  }, [gameState, getAngleFromCenter, isWithinTrack, hasStartedDragging])
 
   // Handle touch/mouse move
   const handleMove = useCallback((clientX: number, clientY: number) => {
     if (gameState !== 'playing' || lastAngleRef.current === null) return
 
-    // 트랙 이탈 체크
     const inTrack = isWithinTrack(clientX, clientY)
 
     if (!inTrack && isInTrackRef.current) {
-      // 트랙에서 이탈
       triggerDeviation()
       isInTrackRef.current = false
       lastAngleRef.current = null
@@ -193,14 +228,14 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     const currentAngle = getAngleFromCenter(clientX, clientY)
     let deltaAngle = currentAngle - lastAngleRef.current
 
-    // Handle angle wrap-around
     if (deltaAngle > 180) deltaAngle -= 360
     if (deltaAngle < -180) deltaAngle += 360
 
-    // Add to velocity with momentum (더 즉각적인 반응)
-    velocityRef.current += deltaAngle * 0.5
+    // 바람 이벤트 중에는 2배 효율
+    const boostMultiplier = windEventActive ? WIND_BOOST_MULTIPLIER : 1
+    velocityRef.current += deltaAngle * 0.5 * boostMultiplier
     lastAngleRef.current = currentAngle
-  }, [gameState, getAngleFromCenter, isWithinTrack, triggerDeviation])
+  }, [gameState, getAngleFromCenter, isWithinTrack, triggerDeviation, windEventActive])
 
   // Handle touch/mouse end
   const handleEnd = useCallback(() => {
@@ -232,13 +267,54 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
   }, [handleStart])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (e.buttons !== 1) return // 마우스 버튼이 눌려있을 때만
+    if (e.buttons !== 1) return
     handleMove(e.clientX, e.clientY)
   }, [handleMove])
 
   const handleMouseUp = useCallback(() => {
     handleEnd()
   }, [handleEnd])
+
+  // 바람 이벤트 시간 설정
+  useEffect(() => {
+    if (gameState === 'playing' && !windEventUsed && windEventTime === null) {
+      const randomTime = Math.floor(Math.random() * (WIND_EVENT_MAX_TIME - WIND_EVENT_MIN_TIME)) + WIND_EVENT_MIN_TIME
+      setWindEventTime(GAME_DURATION - randomTime)
+    }
+  }, [gameState, windEventUsed, windEventTime])
+
+  // 바람 이벤트 활성화/비활성화
+  useEffect(() => {
+    if (gameState !== 'playing' || windEventTime === null || windEventUsed) return
+
+    if (timeLeft <= windEventTime && timeLeft > windEventTime - WIND_EVENT_DURATION) {
+      if (!windEventActive) {
+        setWindEventActive(true)
+        windBoostSpinsRef.current = totalRotationRef.current
+
+        // 바람 파티클 생성
+        const particles: WindParticle[] = Array.from({ length: 20 }, (_, i) => ({
+          id: Date.now() + i,
+          y: Math.random() * 100,
+          delay: Math.random() * 0.5,
+        }))
+        setWindParticles(particles)
+
+        if (navigator.vibrate) {
+          navigator.vibrate([200, 100, 200])
+        }
+      }
+    } else if (timeLeft <= windEventTime - WIND_EVENT_DURATION && windEventActive) {
+      // 바람 이벤트 종료
+      setWindEventActive(false)
+      setWindEventUsed(true)
+      setWindParticles([])
+
+      // 바람 이벤트 중 획득한 회전수 계산
+      const boostSpins = totalRotationRef.current - windBoostSpinsRef.current
+      setWindBoostSpins(boostSpins)
+    }
+  }, [timeLeft, windEventTime, windEventActive, windEventUsed, gameState])
 
   // Game loop
   useEffect(() => {
@@ -249,46 +325,36 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
       const deltaTime = (timestamp - lastTimeRef.current) / 1000
       lastTimeRef.current = timestamp
 
-      // Apply strong friction (빠른 감속)
       velocityRef.current *= FRICTION
 
-      // Stop if very slow
       if (Math.abs(velocityRef.current) < 0.5) {
         velocityRef.current = 0
       }
 
-      // Update rotation
       const newRotation = rotation + velocityRef.current
       setRotation(newRotation)
 
-      // Track total rotation
       totalRotationRef.current += Math.abs(velocityRef.current)
       const newTotalSpins = totalRotationRef.current / 360
       setTotalSpins(newTotalSpins)
 
-      // Calculate RPM (더 직관적인 계산)
       const currentRpm = Math.min(Math.abs(velocityRef.current) * 8, MAX_RPM)
       setRpm(currentRpm)
 
-      // Update max RPM stat
       if (currentRpm > gameStats.maxRpm) {
         setGameStats(prev => ({ ...prev, maxRpm: Math.floor(currentRpm) }))
       }
 
-      // Combo zone (RPM이 70% 이상일 때)
       const inComboZone = (currentRpm / MAX_RPM) * 100 >= COMBO_ZONE_THRESHOLD
 
-      // Update combo
       if (currentRpm >= MIN_RPM_FOR_COMBO && inComboZone) {
         setComboTime(prev => prev + deltaTime)
 
-        // 콤보 카운트 (1초마다 증가)
         const newComboCount = Math.floor(comboTime + deltaTime)
         if (newComboCount > comboCountRef.current) {
           comboCountRef.current = newComboCount
           setComboCount(newComboCount)
 
-          // 50콤보 이상 황금 글로우
           if (newComboCount >= 50 && !goldenGlow) {
             setGoldenGlow(true)
             if (navigator.vibrate) {
@@ -296,23 +362,21 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
             }
           }
 
-          // Max combo stat 업데이트
           if (newComboCount > gameStats.maxCombo) {
             setGameStats(prev => ({ ...prev, maxCombo: newComboCount }))
           }
         }
       } else if (comboTime > 0) {
-        // 콤보 끊김
         setComboTime(0)
         setComboCount(0)
         comboCountRef.current = 0
         setGoldenGlow(false)
       }
 
-      // Spark effects at high RPM
+      // Spark effects
       if (currentRpm > 150 && Math.random() < 0.4) {
         const angle = Math.random() * 360
-        const radius = 30 + Math.random() * 15
+        const radius = TRACK_RADIUS + Math.random() * 5
         const spark: Spark = {
           id: Date.now() + Math.random(),
           x: 50 + Math.cos(angle * Math.PI / 180) * radius,
@@ -321,7 +385,6 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
         }
         setSparks(prev => [...prev.slice(-15), spark])
 
-        // Screen shake at very high RPM
         if (currentRpm > 200 && !shake) {
           setShake(true)
           setTimeout(() => setShake(false), 100)
@@ -357,7 +420,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     return () => clearInterval(timer)
   }, [gameState])
 
-  // Calculate final EXP when game ends
+  // Calculate final stats when game ends
   useEffect(() => {
     if (gameState === 'finished') {
       const comboTier = getCurrentComboTier()
@@ -367,14 +430,22 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
       const deviationPenalty = gameStats.deviations
       const finalExp = Math.max(0, Math.floor((baseExp + comboBonus) * multiplier) - deviationPenalty)
 
+      // 바람 이벤트 활용도 계산 (최대 가능 회전수 대비 실제 획득)
+      const maxPossibleWindSpins = WIND_EVENT_DURATION * 60 * WIND_BOOST_MULTIPLIER
+      const windUsage = windEventUsed ? Math.min(100, Math.floor((windBoostSpins / 360 / maxPossibleWindSpins) * 100 * 50)) : 0
+
+      // MWh 계산 (1회전 = 0.001 MWh 가정)
+      const totalMWh = Math.floor(totalSpins * 0.001 * 100) / 100
+
       setEarnedExp(finalExp)
       setGameStats(prev => ({
         ...prev,
         totalSpins: Math.floor(totalSpins),
-        comboTime: Math.floor(comboTime)
+        windBoostUsage: windUsage,
+        totalMWh,
       }))
     }
-  }, [gameState, totalSpins, comboTime, getCurrentComboTier, gameStats.maxCombo, gameStats.deviations])
+  }, [gameState, totalSpins, getCurrentComboTier, gameStats.maxCombo, gameStats.deviations, windEventUsed, windBoostSpins])
 
   // Start game
   const startGame = () => {
@@ -388,20 +459,28 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     setEarnedExp(0)
     setSparks([])
     setGoldenGlow(false)
+    setShowStartGuide(true)
+    setHasStartedDragging(false)
+    setWindEventActive(false)
+    setWindEventUsed(false)
+    setWindEventTime(null)
+    setWindParticles([])
+    setWindBoostSpins(0)
     setGameStats({
       totalSpins: 0,
       maxRpm: 0,
       maxCombo: 0,
       deviations: 0,
-      comboTime: 0,
+      windBoostUsage: 0,
+      totalMWh: 0,
     })
     velocityRef.current = 0
     totalRotationRef.current = 0
     lastTimeRef.current = 0
     comboCountRef.current = 0
+    windBoostSpinsRef.current = 0
   }
 
-  // Record EXP and close
   const handleRecordExp = () => {
     if (earnedExp > 0) {
       onEarnExp(earnedExp)
@@ -410,7 +489,6 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     setGameState('ready')
   }
 
-  // Get motion blur intensity based on RPM
   const getBlurIntensity = () => {
     if (rpm < 50) return 0
     if (rpm < 100) return 1
@@ -419,8 +497,8 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     return 6
   }
 
-  // Get glow color based on RPM
   const getGlowColor = () => {
+    if (windEventActive) return '#00FF88'
     if (goldenGlow) return '#FFD700'
     if (rpm > 200) return '#EF4444'
     if (rpm > 150) return '#F97316'
@@ -428,10 +506,8 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     return '#00D4FF'
   }
 
-  // RPM percentage for gauge
   const rpmPercent = Math.min((rpm / MAX_RPM) * 100, 100)
   const inComboZone = rpmPercent >= COMBO_ZONE_THRESHOLD
-
   const comboTier = getCurrentComboTier()
   const titleInfo = gameState === 'finished' ? getTitleByStats(gameStats) : null
 
@@ -451,7 +527,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
           onClick={gameState === 'ready' ? onClose : undefined}
         />
 
-        {/* Deviation Flash Overlay */}
+        {/* Deviation Flash */}
         <AnimatePresence>
           {deviationFlash && (
             <motion.div
@@ -463,6 +539,25 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
           )}
         </AnimatePresence>
 
+        {/* Wind Event Particles */}
+        <AnimatePresence>
+          {windEventActive && windParticles.map(particle => (
+            <motion.div
+              key={particle.id}
+              className="absolute left-0 w-20 h-1 bg-gradient-to-r from-transparent via-green-400 to-transparent z-20 pointer-events-none"
+              style={{ top: `${particle.y}%` }}
+              initial={{ x: '-100%', opacity: 0 }}
+              animate={{ x: '100vw', opacity: [0, 1, 1, 0] }}
+              transition={{
+                duration: 1.5,
+                delay: particle.delay,
+                repeat: Infinity,
+                ease: 'linear',
+              }}
+            />
+          ))}
+        </AnimatePresence>
+
         {/* Game Container */}
         <motion.div
           className={`relative w-full max-w-md bg-gradient-to-b from-slate-900 to-slate-950 rounded-3xl overflow-hidden border border-white/10 ${shake ? 'animate-shake' : ''}`}
@@ -470,12 +565,13 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.8, opacity: 0 }}
           style={{
-            boxShadow: goldenGlow
+            boxShadow: windEventActive
+              ? '0 0 100px rgba(0, 255, 136, 0.6)'
+              : goldenGlow
               ? '0 0 80px rgba(255, 215, 0, 0.6)'
               : `0 0 60px ${getGlowColor()}40`,
           }}
         >
-          {/* Close button */}
           {gameState !== 'playing' && (
             <button
               onClick={onClose}
@@ -505,25 +601,25 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
               </div>
               <h3 className="text-xl font-bold text-white mb-2">풍력발전기를 돌려라!</h3>
               <p className="text-slate-400 mb-4 text-sm">
-                60초 동안 원형 트랙을 따라 스와이프하세요!<br />
-                트랙을 벗어나면 <span className="text-red-400">경로 이탈</span> 패널티!
+                날개 끝을 잡고 원을 그리며 스와이프!<br />
+                <span className="text-green-400">돌풍 이벤트</span>를 놓치지 마세요!
               </p>
 
-              <div className="bg-white/5 rounded-xl p-4 mb-4 text-left">
-                <p className="text-xs text-slate-500 mb-2">콤보 보너스</p>
-                <div className="space-y-1 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-yellow-400">10초 유지</span>
-                    <span className="text-white">1.5배 EXP</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-orange-400">30초 유지</span>
-                    <span className="text-white">2배 EXP</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-red-400">50초 유지</span>
-                    <span className="text-white">3배 EXP + 황금빛!</span>
-                  </div>
+              <div className="bg-white/5 rounded-xl p-4 mb-4 text-left space-y-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <div className="w-3 h-3 rounded-full bg-green-400" />
+                  <span className="text-green-400">돌풍 이벤트</span>
+                  <span className="text-slate-400">- 5초간 RPM 2배!</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <div className="w-3 h-3 rounded-full bg-yellow-400" />
+                  <span className="text-yellow-400">콤보 존</span>
+                  <span className="text-slate-400">- RPM 70% 이상 유지</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <div className="w-3 h-3 rounded-full bg-red-400" />
+                  <span className="text-red-400">경로 이탈</span>
+                  <span className="text-slate-400">- 트랙 밖으로 나가면 패널티</span>
                 </div>
               </div>
 
@@ -543,7 +639,6 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
             <div className="p-4">
               {/* Stats Bar */}
               <div className="flex justify-between items-center mb-3">
-                {/* Time */}
                 <div className={`text-center ${timeLeft <= 10 ? 'animate-pulse' : ''}`}>
                   <p className="text-[10px] text-slate-500">남은 시간</p>
                   <p className={`text-xl font-bold ${timeLeft <= 10 ? 'text-red-400' : 'text-white'}`}>
@@ -551,7 +646,6 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   </p>
                 </div>
 
-                {/* Combo Display */}
                 <div className="text-center">
                   {comboTier ? (
                     <motion.div
@@ -573,14 +667,35 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   )}
                 </div>
 
-                {/* Spins */}
                 <div className="text-center">
                   <p className="text-[10px] text-slate-500">회전수</p>
                   <p className="text-xl font-bold text-kepco-cyan">{Math.floor(totalSpins)}</p>
                 </div>
               </div>
 
-              {/* RPM Gauge - 자동차 계기판 스타일 */}
+              {/* Wind Event Banner */}
+              <AnimatePresence>
+                {windEventActive && (
+                  <motion.div
+                    className="mb-3 py-2 px-4 rounded-xl bg-gradient-to-r from-green-500/30 via-emerald-500/30 to-green-500/30 border border-green-400/50"
+                    initial={{ opacity: 0, y: -20, scale: 0.9 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -20, scale: 0.9 }}
+                  >
+                    <motion.div
+                      className="flex items-center justify-center gap-2"
+                      animate={{ scale: [1, 1.05, 1] }}
+                      transition={{ duration: 0.5, repeat: Infinity }}
+                    >
+                      <Wind className="w-5 h-5 text-green-400" />
+                      <span className="text-lg font-black text-green-400">WIND BOOST!</span>
+                      <span className="text-sm text-white">x2</span>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* RPM Gauge */}
               <div className="mb-3 bg-slate-800/50 rounded-xl p-3">
                 <div className="flex justify-between items-center mb-1">
                   <div className="flex items-center gap-1">
@@ -592,45 +707,32 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   </span>
                 </div>
 
-                {/* Gauge Bar */}
                 <div className="relative h-4 bg-slate-900 rounded-full overflow-hidden">
-                  {/* Combo Zone Indicator */}
                   <div
                     className="absolute right-0 h-full bg-yellow-500/20 border-l-2 border-yellow-500/50"
                     style={{ width: `${100 - COMBO_ZONE_THRESHOLD}%` }}
                   />
-
-                  {/* RPM Fill */}
                   <motion.div
                     className="absolute left-0 h-full rounded-full transition-all duration-100"
                     style={{
                       width: `${rpmPercent}%`,
-                      background: goldenGlow
+                      background: windEventActive
+                        ? 'linear-gradient(90deg, #00FF88, #00D4FF)'
+                        : goldenGlow
                         ? 'linear-gradient(90deg, #FFD700, #FFA500)'
                         : `linear-gradient(90deg, #00D4FF, ${getGlowColor()})`,
                       boxShadow: `0 0 15px ${getGlowColor()}`,
                     }}
                   />
-
-                  {/* Combo Zone Label */}
                   {inComboZone && (
                     <motion.div
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] font-bold text-yellow-400"
                       animate={{ opacity: [0.5, 1, 0.5] }}
                       transition={{ duration: 0.5, repeat: Infinity }}
                     >
-                      COMBO ZONE!
+                      COMBO!
                     </motion.div>
                   )}
-                </div>
-
-                {/* Gauge Labels */}
-                <div className="flex justify-between text-[8px] text-slate-600 mt-1">
-                  <span>0</span>
-                  <span>62</span>
-                  <span>125</span>
-                  <span className="text-yellow-500">187</span>
-                  <span className="text-red-400">MAX</span>
                 </div>
               </div>
 
@@ -644,7 +746,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                     exit={{ opacity: 0 }}
                   >
                     <span className="text-xs font-bold text-yellow-400 flex items-center justify-center gap-1">
-                      <Award className="w-4 h-4" /> 50+ COMBO! 황금 발전기 가동 중!
+                      <Award className="w-4 h-4" /> 50+ COMBO!
                     </span>
                   </motion.div>
                 )}
@@ -687,38 +789,28 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   }}
                 />
 
-                {/* Swipe Track Guide - 네온 트랙 */}
+                {/* Swipe Track - 날개 끝 반경과 동기화 */}
                 <div
-                  className="absolute rounded-full border-2 border-dashed transition-colors duration-300"
+                  className="absolute rounded-full transition-colors duration-300"
                   style={{
-                    left: `${50 - TRACK_OUTER_RADIUS}%`,
-                    top: `${50 - TRACK_OUTER_RADIUS}%`,
-                    width: `${TRACK_OUTER_RADIUS * 2}%`,
-                    height: `${TRACK_OUTER_RADIUS * 2}%`,
-                    borderColor: showDeviation ? '#EF4444' : `${getGlowColor()}60`,
-                    boxShadow: `0 0 20px ${showDeviation ? '#EF4444' : getGlowColor()}30`,
-                  }}
-                />
-                <div
-                  className="absolute rounded-full border-2 border-dashed transition-colors duration-300"
-                  style={{
-                    left: `${50 - TRACK_INNER_RADIUS}%`,
-                    top: `${50 - TRACK_INNER_RADIUS}%`,
-                    width: `${TRACK_INNER_RADIUS * 2}%`,
-                    height: `${TRACK_INNER_RADIUS * 2}%`,
-                    borderColor: showDeviation ? '#EF4444' : `${getGlowColor()}60`,
+                    left: `${50 - TRACK_RADIUS - TRACK_WIDTH / 2}%`,
+                    top: `${50 - TRACK_RADIUS - TRACK_WIDTH / 2}%`,
+                    width: `${(TRACK_RADIUS + TRACK_WIDTH / 2) * 2}%`,
+                    height: `${(TRACK_RADIUS + TRACK_WIDTH / 2) * 2}%`,
+                    border: `${TRACK_WIDTH / 2}px solid ${showDeviation ? '#EF444440' : `${getGlowColor()}20`}`,
+                    boxShadow: `inset 0 0 30px ${getGlowColor()}10, 0 0 20px ${showDeviation ? '#EF4444' : getGlowColor()}20`,
                   }}
                 />
 
-                {/* Track Fill Hint */}
+                {/* Track center line */}
                 <div
-                  className="absolute rounded-full opacity-10"
+                  className="absolute rounded-full border-2 border-dashed transition-colors duration-300"
                   style={{
-                    left: `${50 - TRACK_OUTER_RADIUS}%`,
-                    top: `${50 - TRACK_OUTER_RADIUS}%`,
-                    width: `${TRACK_OUTER_RADIUS * 2}%`,
-                    height: `${TRACK_OUTER_RADIUS * 2}%`,
-                    background: `radial-gradient(circle, transparent ${(TRACK_INNER_RADIUS / TRACK_OUTER_RADIUS) * 100}%, ${getGlowColor()} ${(TRACK_INNER_RADIUS / TRACK_OUTER_RADIUS) * 100}%, ${getGlowColor()} 100%)`,
+                    left: `${50 - TRACK_RADIUS}%`,
+                    top: `${50 - TRACK_RADIUS}%`,
+                    width: `${TRACK_RADIUS * 2}%`,
+                    height: `${TRACK_RADIUS * 2}%`,
+                    borderColor: showDeviation ? '#EF4444' : `${getGlowColor()}40`,
                   }}
                 />
 
@@ -730,8 +822,8 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                     style={{
                       left: `${spark.x}%`,
                       top: `${spark.y}%`,
-                      backgroundColor: goldenGlow ? '#FFD700' : getGlowColor(),
-                      boxShadow: `0 0 10px ${goldenGlow ? '#FFD700' : getGlowColor()}`,
+                      backgroundColor: getGlowColor(),
+                      boxShadow: `0 0 10px ${getGlowColor()}`,
                     }}
                     initial={{ scale: 1, opacity: 1 }}
                     animate={{ scale: 0, opacity: 0 }}
@@ -739,79 +831,125 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   />
                 ))}
 
-                {/* Tower (Fixed) - 지지대 고정 */}
-                <div className="absolute left-1/2 bottom-[10%] -translate-x-1/2 w-4 h-[35%] z-10">
-                  <div className="w-full h-full bg-gradient-to-b from-slate-400 to-slate-600 rounded-sm" />
-                </div>
+                {/* Integrated Turbine (Tower + Blades) */}
+                <svg
+                  className="absolute inset-0 w-full h-full"
+                  viewBox="0 0 100 100"
+                  style={{ filter: `drop-shadow(0 2px 4px rgba(0,0,0,0.3))` }}
+                >
+                  {/* Tower - 고정 */}
+                  <defs>
+                    <linearGradient id="towerGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#94a3b8" />
+                      <stop offset="50%" stopColor="#f1f5f9" />
+                      <stop offset="100%" stopColor="#94a3b8" />
+                    </linearGradient>
+                    <linearGradient id="bladeGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#ffffff" />
+                      <stop offset="100%" stopColor={getGlowColor()} />
+                    </linearGradient>
+                    <filter id="glow">
+                      <feGaussianBlur stdDeviation="1" result="coloredBlur" />
+                      <feMerge>
+                        <feMergeNode in="coloredBlur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                  </defs>
 
-                {/* Nacelle (Housing) - 발전기 하우징 */}
+                  {/* Tower base */}
+                  <path
+                    d="M48 50 L46 85 L54 85 L52 50 Z"
+                    fill="url(#towerGradient)"
+                  />
+
+                  {/* Tower top platform */}
+                  <ellipse cx="50" cy="50" rx="6" ry="3" fill="#64748b" />
+                </svg>
+
+                {/* Rotating Blades */}
                 <div
-                  className="absolute left-1/2 top-[18%] -translate-x-1/2 w-16 h-8 rounded-full z-20"
+                  className="absolute inset-0"
                   style={{
-                    background: 'linear-gradient(to bottom, #64748b, #334155)',
-                    boxShadow: goldenGlow ? '0 0 30px #FFD700' : `0 0 20px ${getGlowColor()}40`,
-                  }}
-                />
-
-                {/* Blades (Rotating) - 날개만 회전 */}
-                <div className="absolute left-1/2 top-[22%] -translate-x-1/2 -translate-y-1/2 w-[70%] h-[70%] z-15">
-                  <motion.div
-                    className="relative w-full h-full"
-                    style={{
-                      rotate: rotation,
-                      filter: `blur(${getBlurIntensity()}px)`,
-                      transformOrigin: 'center center',
-                    }}
-                  >
-                    {/* Blades */}
-                    {[0, 120, 240].map((angle, i) => (
-                      <div
-                        key={i}
-                        className="absolute left-1/2 top-1/2 w-3 origin-bottom"
-                        style={{
-                          height: '48%',
-                          transform: `translateX(-50%) translateY(-100%) rotate(${angle}deg)`,
-                          transformOrigin: 'bottom center',
-                        }}
-                      >
-                        <div
-                          className="w-full h-full rounded-t-full transition-all duration-200"
-                          style={{
-                            background: goldenGlow
-                              ? 'linear-gradient(to top, #FFD700, #FFF8DC)'
-                              : `linear-gradient(to top, ${getGlowColor()}, white)`,
-                            boxShadow: rpm > 100
-                              ? `0 0 20px ${goldenGlow ? '#FFD700' : getGlowColor()}`
-                              : 'none',
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </motion.div>
-                </div>
-
-                {/* Center hub */}
-                <div
-                  className="absolute left-1/2 top-[22%] -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-700 border-4 flex items-center justify-center z-30"
-                  style={{
-                    borderColor: goldenGlow ? '#FFD700' : getGlowColor(),
-                    boxShadow: `0 0 25px ${goldenGlow ? '#FFD700' : getGlowColor()}60`,
+                    transform: `rotate(${rotation}deg)`,
+                    transformOrigin: 'center 50%',
+                    filter: `blur(${getBlurIntensity()}px)`,
                   }}
                 >
-                  <Zap
-                    className="w-5 h-5"
-                    style={{ color: goldenGlow ? '#FFD700' : getGlowColor() }}
-                  />
+                  <svg className="w-full h-full" viewBox="0 0 100 100">
+                    <defs>
+                      <linearGradient id="bladeGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+                        <stop offset="0%" stopColor={getGlowColor()} stopOpacity="0.8" />
+                        <stop offset="100%" stopColor="#ffffff" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Three Blades */}
+                    {[0, 120, 240].map((angle, i) => (
+                      <g key={i} transform={`rotate(${angle} 50 50)`}>
+                        <path
+                          d={`M49 50 L47 ${50 - BLADE_LENGTH_PERCENT} Q50 ${50 - BLADE_LENGTH_PERCENT - 3} 53 ${50 - BLADE_LENGTH_PERCENT} L51 50 Z`}
+                          fill="url(#bladeGrad)"
+                          style={{
+                            filter: rpm > 100 ? `drop-shadow(0 0 ${rpm > 200 ? 8 : 4}px ${getGlowColor()})` : 'none',
+                          }}
+                        />
+                      </g>
+                    ))}
+
+                    {/* Center Hub */}
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="5"
+                      fill="#334155"
+                      stroke={getGlowColor()}
+                      strokeWidth="1.5"
+                      style={{
+                        filter: `drop-shadow(0 0 10px ${getGlowColor()})`,
+                      }}
+                    />
+                    <circle cx="50" cy="50" r="2" fill={getGlowColor()} />
+                  </svg>
                 </div>
 
+                {/* Start Guide - 날개 끝에 표시 */}
+                <AnimatePresence>
+                  {showStartGuide && gameState === 'playing' && (
+                    <motion.div
+                      className="absolute z-30 pointer-events-none"
+                      style={{
+                        left: '50%',
+                        top: `${50 - BLADE_LENGTH_PERCENT - 5}%`,
+                        transform: 'translateX(-50%)',
+                      }}
+                      initial={{ opacity: 0, scale: 0 }}
+                      animate={{ opacity: 1, scale: [1, 1.2, 1] }}
+                      exit={{ opacity: 0, scale: 0 }}
+                      transition={{ duration: 0.5, repeat: Infinity }}
+                    >
+                      <div className="flex flex-col items-center">
+                        <motion.div
+                          className="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center"
+                          animate={{ boxShadow: ['0 0 10px #FBBF24', '0 0 30px #FBBF24', '0 0 10px #FBBF24'] }}
+                          transition={{ duration: 1, repeat: Infinity }}
+                        >
+                          <Hand className="w-6 h-6 text-white" />
+                        </motion.div>
+                        <p className="text-[10px] text-yellow-400 mt-1 whitespace-nowrap">여기를 잡고 돌려요!</p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* Touch hint */}
-                {rpm < 10 && !showDeviation && (
+                {rpm < 10 && !showDeviation && !showStartGuide && (
                   <motion.p
                     className="absolute bottom-4 left-0 right-0 text-center text-slate-500 text-xs"
                     animate={{ opacity: [0.5, 1, 0.5] }}
                     transition={{ duration: 1.5, repeat: Infinity }}
                   >
-                    트랙을 따라 원을 그리며 스와이프!
+                    트랙을 따라 스와이프!
                   </motion.p>
                 )}
               </div>
@@ -839,7 +977,6 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
 
               <h3 className="text-xl font-bold text-white mb-1">게임 종료!</h3>
 
-              {/* 칭호 */}
               {titleInfo && (
                 <motion.div
                   className="mb-4"
@@ -857,7 +994,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
               {/* 상세 운전일지 */}
               <div className="bg-white/5 rounded-xl p-4 mb-4 text-left">
                 <p className="text-xs text-slate-500 mb-3 text-center font-medium">운전일지</p>
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-2 gap-2 text-sm">
                   <div className="bg-slate-800/50 rounded-lg p-2">
                     <p className="text-[10px] text-slate-500">총 회전수</p>
                     <p className="text-lg font-bold text-kepco-cyan">{gameStats.totalSpins}</p>
@@ -867,17 +1004,17 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                     <p className="text-lg font-bold text-yellow-400">{gameStats.maxRpm}</p>
                   </div>
                   <div className="bg-slate-800/50 rounded-lg p-2">
-                    <p className="text-[10px] text-slate-500">최대 콤보</p>
-                    <p className="text-lg font-bold text-orange-400">{gameStats.maxCombo}초</p>
+                    <p className="text-[10px] text-slate-500">바람 활용도</p>
+                    <p className="text-lg font-bold text-green-400">{gameStats.windBoostUsage}%</p>
                   </div>
                   <div className="bg-slate-800/50 rounded-lg p-2">
-                    <p className="text-[10px] text-slate-500">경로 이탈</p>
-                    <p className="text-lg font-bold text-red-400">{gameStats.deviations}회</p>
+                    <p className="text-[10px] text-slate-500">총 발전량</p>
+                    <p className="text-lg font-bold text-blue-400">{gameStats.totalMWh} MWh</p>
                   </div>
                 </div>
 
                 <div className="mt-3 pt-3 border-t border-white/10 flex justify-between items-center">
-                  <span className="text-slate-300 font-medium">오늘의 총 발전량</span>
+                  <span className="text-slate-300 font-medium">획득 EXP</span>
                   <span className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
                     {earnedExp} EXP
                   </span>
@@ -908,7 +1045,6 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
         </motion.div>
       </motion.div>
 
-      {/* Custom CSS for shake animation */}
       <style jsx global>{`
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
