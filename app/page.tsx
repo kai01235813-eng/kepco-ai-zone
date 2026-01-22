@@ -33,7 +33,11 @@ import {
   Telescope,
   Newspaper,
   ExternalLink,
+  Wind,
 } from 'lucide-react'
+
+// Games
+import { WindTurbineGame } from './games'
 
 // ==================== Types ====================
 interface UserData {
@@ -1499,6 +1503,7 @@ const DashboardScreen = ({
   const [linkClickRecord, setLinkClickRecord] = useState<LinkClickRecord>({ date: '', clickedLinks: [] })
   const [showSettings, setShowSettings] = useState(false)
   const [showLinkCelebration, setShowLinkCelebration] = useState(false)
+  const [showWindTurbineGame, setShowWindTurbineGame] = useState(false)
 
   const selectedCharacter = CHARACTERS.find((c) => c.id === userData.characterId)
 
@@ -1536,6 +1541,32 @@ const DashboardScreen = ({
       setShowLevelUp(true)
     }
   }
+
+  // 게임에서 EXP 획득 처리
+  const handleGameExp = useCallback((exp: number) => {
+    if (exp <= 0) return
+
+    const newTotalExp = userData.totalExp + exp
+    const oldLevel = Math.floor(userData.totalExp / EXP_PER_LEVEL) + 1
+    const newLvl = Math.floor(newTotalExp / EXP_PER_LEVEL) + 1
+
+    const updatedData: UserData = {
+      ...userData,
+      exp: newTotalExp % EXP_PER_LEVEL,
+      level: newLvl,
+      totalExp: newTotalExp,
+    }
+    onUpdateUserData(updatedData)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData))
+
+    // 레벨업 체크
+    if (newLvl > oldLevel) {
+      setTimeout(() => {
+        setNewLevel(newLvl)
+        setShowLevelUp(true)
+      }, 500)
+    }
+  }, [userData, onUpdateUserData])
 
   // 외부 링크 클릭 처리 (Simulation, News 등)
   const handleExternalLinkClick = (e: React.MouseEvent, linkId: string, url: string) => {
@@ -1915,12 +1946,31 @@ const DashboardScreen = ({
                     className="overflow-hidden"
                   >
                     <div className="space-y-2 pt-2 border-t border-white/10">
+                      {/* 풍력 끙차돌리기 게임 */}
                       <motion.button
-                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-[10px] text-slate-400 text-left flex items-center gap-2"
-                        whileHover={{ scale: 1.02 }}
+                        className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-cyan-500/30 to-blue-500/30 text-[10px] text-left flex items-center justify-between relative overflow-hidden group"
+                        whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(0, 212, 255, 0.4)' }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setShowWindTurbineGame(true)
+                        }}
+                      >
+                        <motion.div
+                          className="absolute inset-0 bg-gradient-to-r from-cyan-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+                        />
+                        <span className="relative z-10 flex items-center gap-1.5 text-cyan-300">
+                          <Wind className="w-3.5 h-3.5" />
+                          풍력 끙차돌리기
+                        </span>
+                        <span className="relative z-10 text-green-400 font-medium">EXP</span>
+                      </motion.button>
+                      {/* 개발중인 게임 슬롯 */}
+                      <motion.button
+                        className="w-full py-2 px-3 rounded-lg bg-white/5 text-[10px] text-slate-500 text-left flex items-center gap-2 cursor-not-allowed"
                         whileTap={{ scale: 0.98 }}
                       >
-                        <Construction className="w-3 h-3" /> 개발중
+                        <Construction className="w-3 h-3" /> 추가 예정
                       </motion.button>
                     </div>
                   </motion.div>
@@ -2095,6 +2145,13 @@ const DashboardScreen = ({
         onCheckInSuccess={handleCheckInSuccess}
         selectedCharacter={selectedCharacter}
         testMode={testMode}
+      />
+
+      {/* Wind Turbine Game */}
+      <WindTurbineGame
+        isOpen={showWindTurbineGame}
+        onClose={() => setShowWindTurbineGame(false)}
+        onEarnExp={handleGameExp}
       />
     </motion.div>
   )
