@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Zap, Wind, Trophy, BookOpen, AlertTriangle, Flame, Award, Hand } from 'lucide-react'
+import { X, Wind, Trophy, BookOpen, Flame, RotateCcw } from 'lucide-react'
 
 // ==================== Types ====================
 interface WindTurbineGameProps {
@@ -15,7 +15,6 @@ interface Spark {
   id: number
   x: number
   y: number
-  angle: number
 }
 
 interface WindParticle {
@@ -29,28 +28,29 @@ interface GameStats {
   maxRpm: number
   maxCombo: number
   deviations: number
-  windBoostUsage: number // 바람 이벤트 활용도 (0~100%)
+  windBoostUsage: number
   totalMWh: number
 }
 
 // ==================== Constants ====================
 const GAME_DURATION = 60
-const FRICTION = 0.93
+const FRICTION = 0.94
 const MIN_RPM_FOR_COMBO = 50
 const SPINS_PER_EXP = 1000
 const COMBO_ZONE_THRESHOLD = 70
 const MAX_RPM = 250
 
-// 트랙 설정 - 날개 끝과 동기화
-const BLADE_LENGTH_PERCENT = 38 // 날개 길이 (중심에서 %)
-const TRACK_WIDTH = 12 // 트랙 두께 (%)
-const TRACK_RADIUS = BLADE_LENGTH_PERCENT // 트랙 반경 = 날개 끝
+// 트랙 & 히트박스 설정 - 1.2배 확장
+const BLADE_LENGTH_PERCENT = 38
+const HITBOX_MULTIPLIER = 1.2 // 히트박스 1.2배 확장
+const TRACK_INNER_RADIUS = BLADE_LENGTH_PERCENT * 0.5
+const TRACK_OUTER_RADIUS = BLADE_LENGTH_PERCENT * HITBOX_MULTIPLIER
 
-// 바람 이벤트 설정
-const WIND_EVENT_MIN_TIME = 10 // 시작 후 최소 10초
-const WIND_EVENT_MAX_TIME = 50 // 종료 10초 전까지
-const WIND_EVENT_DURATION = 5 // 5초간 지속
-const WIND_BOOST_MULTIPLIER = 2 // RPM 효율 2배
+// 바람 이벤트
+const WIND_EVENT_MIN_TIME = 10
+const WIND_EVENT_MAX_TIME = 50
+const WIND_EVENT_DURATION = 5
+const WIND_BOOST_MULTIPLIER = 2
 
 const COMBO_TIERS = [
   { time: 50, multiplier: 3, color: '#EF4444', name: 'OVERLOAD!', glow: true },
@@ -58,10 +58,8 @@ const COMBO_TIERS = [
   { time: 10, multiplier: 1.5, color: '#FBBF24', name: 'COMBO!' },
 ]
 
-// 칭호 시스템
 const getTitleByStats = (stats: GameStats): { title: string; rank: string; color: string } => {
   const score = stats.totalSpins * (1 + stats.maxCombo * 0.01) - stats.deviations * 10 + stats.windBoostUsage
-
   if (score >= 600 && stats.deviations <= 2 && stats.windBoostUsage >= 80) {
     return { title: '바람의 지배자', rank: '상위 0.1%', color: '#FF6B6B' }
   } else if (score >= 400 && stats.deviations <= 3) {
@@ -70,12 +68,11 @@ const getTitleByStats = (stats: GameStats): { title: string; rank: string; color
     return { title: '숙련된 운전원', rank: '상위 10%', color: '#C0C0C0' }
   } else if (score >= 100) {
     return { title: '유망한 신입', rank: '상위 30%', color: '#CD7F32' }
-  } else {
-    return { title: '견습 운전원', rank: '열심히 하세요!', color: '#00D4FF' }
   }
+  return { title: '견습 운전원', rank: '열심히 하세요!', color: '#00D4FF' }
 }
 
-// ==================== Wind Turbine Game Component ====================
+// ==================== Main Component ====================
 export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurbineGameProps) {
   // Game state
   const [gameState, setGameState] = useState<'ready' | 'playing' | 'finished'>('ready')
@@ -88,52 +85,47 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
   const [earnedExp, setEarnedExp] = useState(0)
   const [sparks, setSparks] = useState<Spark[]>([])
   const [shake, setShake] = useState(false)
-  const [showDeviation, setShowDeviation] = useState(false)
-  const [deviationFlash, setDeviationFlash] = useState(false)
+  const [showWrongDirection, setShowWrongDirection] = useState(false)
   const [goldenGlow, setGoldenGlow] = useState(false)
 
-  // 시작 가이드
+  // Guide state
   const [showStartGuide, setShowStartGuide] = useState(true)
-  const [hasStartedDragging, setHasStartedDragging] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
 
-  // 바람 이벤트
+  // Wind event
   const [windEventActive, setWindEventActive] = useState(false)
   const [windEventUsed, setWindEventUsed] = useState(false)
   const [windEventTime, setWindEventTime] = useState<number | null>(null)
   const [windParticles, setWindParticles] = useState<WindParticle[]>([])
   const [windBoostSpins, setWindBoostSpins] = useState(0)
 
-  // Stats tracking
+  // Stats
   const [gameStats, setGameStats] = useState<GameStats>({
-    totalSpins: 0,
-    maxRpm: 0,
-    maxCombo: 0,
-    deviations: 0,
-    windBoostUsage: 0,
-    totalMWh: 0,
+    totalSpins: 0, maxRpm: 0, maxCombo: 0, deviations: 0, windBoostUsage: 0, totalMWh: 0,
   })
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null)
   const lastAngleRef = useRef<number | null>(null)
-  const velocityRef = useRef(0)
+  const angularVelocityRef = useRef(0)
   const animationRef = useRef<number>()
   const lastTimeRef = useRef<number>(0)
   const totalRotationRef = useRef(0)
-  const isInTrackRef = useRef(true)
   const comboCountRef = useRef(0)
   const windBoostSpinsRef = useRef(0)
+  const pointerIdRef = useRef<number | null>(null)
 
-  // Get current combo tier
-  const getCurrentComboTier = useCallback(() => {
-    for (const tier of COMBO_TIERS) {
-      if (comboTime >= tier.time) return tier
-    }
-    return null
-  }, [comboTime])
+  // ==================== Pointer Helpers ====================
+  const getAngleFromCenter = useCallback((clientX: number, clientY: number): number => {
+    if (!containerRef.current) return 0
+    const rect = containerRef.current.getBoundingClientRect()
+    const centerX = rect.left + rect.width / 2
+    const centerY = rect.top + rect.height / 2
+    // 반시계방향을 위해 음수 처리
+    return -Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI)
+  }, [])
 
-  // Calculate distance from center (percentage)
-  const getDistanceFromCenter = useCallback((clientX: number, clientY: number) => {
+  const getDistancePercent = useCallback((clientX: number, clientY: number): number => {
     if (!containerRef.current) return 0
     const rect = containerRef.current.getBoundingClientRect()
     const centerX = rect.left + rect.width / 2
@@ -141,182 +133,86 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     const dx = clientX - centerX
     const dy = clientY - centerY
     const distance = Math.sqrt(dx * dx + dy * dy)
-    const maxDistance = rect.width / 2
-    return (distance / maxDistance) * 100
+    const maxRadius = rect.width / 2
+    return (distance / maxRadius) * 100
   }, [])
 
-  // Check if position is within track (날개 끝 반경과 동기화)
-  const isWithinTrack = useCallback((clientX: number, clientY: number) => {
-    const distance = getDistanceFromCenter(clientX, clientY)
-    const innerRadius = TRACK_RADIUS - TRACK_WIDTH / 2
-    const outerRadius = TRACK_RADIUS + TRACK_WIDTH / 2
-    return distance >= innerRadius && distance <= outerRadius
-  }, [getDistanceFromCenter])
+  const isInHitbox = useCallback((clientX: number, clientY: number): boolean => {
+    const dist = getDistancePercent(clientX, clientY)
+    return dist >= TRACK_INNER_RADIUS && dist <= TRACK_OUTER_RADIUS
+  }, [getDistancePercent])
 
-  // Calculate angle from touch/mouse position
-  const getAngleFromCenter = useCallback((clientX: number, clientY: number) => {
-    if (!containerRef.current) return 0
-    const rect = containerRef.current.getBoundingClientRect()
-    const centerX = rect.left + rect.width / 2
-    const centerY = rect.top + rect.height / 2
-    return Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI)
-  }, [])
-
-  // Trigger deviation penalty
-  const triggerDeviation = useCallback(() => {
+  // ==================== Pointer Events (Unified) ====================
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (gameState !== 'playing') return
+    e.preventDefault()
+    e.stopPropagation()
 
-    setShowDeviation(true)
-    setDeviationFlash(true)
-    setComboTime(0)
-    setComboCount(0)
-    comboCountRef.current = 0
-    setGoldenGlow(false)
+    const { clientX, clientY, pointerId } = e
 
-    // 감점: 회전수 5% 감소 + RPM 급격히 감소
-    totalRotationRef.current = Math.max(0, totalRotationRef.current * 0.95)
-    velocityRef.current *= 0.3 // RPM 급격히 감소
+    // 히트박스 체크 (넓은 영역)
+    if (!isInHitbox(clientX, clientY)) return
 
-    // 진동 피드백
-    if (navigator.vibrate) {
-      navigator.vibrate([50, 30, 50, 30, 100])
+    // Pointer Capture - 드래그가 영역 밖으로 나가도 유지
+    if (containerRef.current) {
+      containerRef.current.setPointerCapture(pointerId)
     }
 
-    setGameStats(prev => ({ ...prev, deviations: prev.deviations + 1 }))
-
-    setTimeout(() => {
-      setShowDeviation(false)
-      setDeviationFlash(false)
-    }, 800)
-  }, [gameState])
-
-  // Handle touch/mouse start
-  const handleStart = useCallback((clientX: number, clientY: number) => {
-    if (gameState !== 'playing') return
-
-    // 첫 드래그 시 가이드 숨김
-    if (!hasStartedDragging) {
-      setHasStartedDragging(true)
-      setShowStartGuide(false)
-    }
-
-    if (!isWithinTrack(clientX, clientY)) {
-      isInTrackRef.current = false
-      return
-    }
-
-    isInTrackRef.current = true
+    pointerIdRef.current = pointerId
     lastAngleRef.current = getAngleFromCenter(clientX, clientY)
-  }, [gameState, getAngleFromCenter, isWithinTrack, hasStartedDragging])
+    setIsDragging(true)
+    setShowStartGuide(false)
+  }, [gameState, isInHitbox, getAngleFromCenter])
 
-  // Handle touch/mouse move
-  const handleMove = useCallback((clientX: number, clientY: number) => {
-    if (gameState !== 'playing' || lastAngleRef.current === null) return
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (gameState !== 'playing' || !isDragging) return
+    if (pointerIdRef.current !== e.pointerId) return
+    e.preventDefault()
 
-    const inTrack = isWithinTrack(clientX, clientY)
+    const { clientX, clientY } = e
+    const currentAngle = getAngleFromCenter(clientX, clientY)
 
-    if (!inTrack && isInTrackRef.current) {
-      triggerDeviation()
-      isInTrackRef.current = false
-      lastAngleRef.current = null
-      return
+    if (lastAngleRef.current !== null) {
+      let deltaAngle = currentAngle - lastAngleRef.current
+
+      // 각도 래핑 처리 (-180 ~ 180)
+      if (deltaAngle > 180) deltaAngle -= 360
+      if (deltaAngle < -180) deltaAngle += 360
+
+      // 반시계방향(CCW) = 양수 deltaAngle
+      if (deltaAngle > 0) {
+        // 반시계방향 - 가속!
+        const boost = windEventActive ? WIND_BOOST_MULTIPLIER : 1
+        angularVelocityRef.current += deltaAngle * 0.6 * boost
+        setShowWrongDirection(false)
+      } else if (deltaAngle < -5) {
+        // 시계방향 - 저항 (강한 감속)
+        angularVelocityRef.current *= 0.7
+        setShowWrongDirection(true)
+        setTimeout(() => setShowWrongDirection(false), 300)
+      }
     }
 
-    if (!inTrack) return
-
-    isInTrackRef.current = true
-    const currentAngle = getAngleFromCenter(clientX, clientY)
-    let deltaAngle = currentAngle - lastAngleRef.current
-
-    if (deltaAngle > 180) deltaAngle -= 360
-    if (deltaAngle < -180) deltaAngle += 360
-
-    // 바람 이벤트 중에는 2배 효율
-    const boostMultiplier = windEventActive ? WIND_BOOST_MULTIPLIER : 1
-    velocityRef.current += deltaAngle * 0.5 * boostMultiplier
     lastAngleRef.current = currentAngle
-  }, [gameState, getAngleFromCenter, isWithinTrack, triggerDeviation, windEventActive])
+  }, [gameState, isDragging, getAngleFromCenter, windEventActive])
 
-  // Handle touch/mouse end
-  const handleEnd = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (pointerIdRef.current !== e.pointerId) return
+
+    if (containerRef.current) {
+      containerRef.current.releasePointerCapture(e.pointerId)
+    }
+
+    pointerIdRef.current = null
     lastAngleRef.current = null
-    isInTrackRef.current = true
+    setIsDragging(false)
   }, [])
 
-  // Touch event handlers
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    e.preventDefault()
-    const touch = e.touches[0]
-    handleStart(touch.clientX, touch.clientY)
-  }, [handleStart])
+  const handlePointerCancel = useCallback((e: React.PointerEvent) => {
+    handlePointerUp(e)
+  }, [handlePointerUp])
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    e.preventDefault()
-    const touch = e.touches[0]
-    handleMove(touch.clientX, touch.clientY)
-  }, [handleMove])
-
-  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    e.preventDefault()
-    handleEnd()
-  }, [handleEnd])
-
-  // Mouse event handlers
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    handleStart(e.clientX, e.clientY)
-  }, [handleStart])
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (e.buttons !== 1) return
-    handleMove(e.clientX, e.clientY)
-  }, [handleMove])
-
-  const handleMouseUp = useCallback(() => {
-    handleEnd()
-  }, [handleEnd])
-
-  // 바람 이벤트 시간 설정
-  useEffect(() => {
-    if (gameState === 'playing' && !windEventUsed && windEventTime === null) {
-      const randomTime = Math.floor(Math.random() * (WIND_EVENT_MAX_TIME - WIND_EVENT_MIN_TIME)) + WIND_EVENT_MIN_TIME
-      setWindEventTime(GAME_DURATION - randomTime)
-    }
-  }, [gameState, windEventUsed, windEventTime])
-
-  // 바람 이벤트 활성화/비활성화
-  useEffect(() => {
-    if (gameState !== 'playing' || windEventTime === null || windEventUsed) return
-
-    if (timeLeft <= windEventTime && timeLeft > windEventTime - WIND_EVENT_DURATION) {
-      if (!windEventActive) {
-        setWindEventActive(true)
-        windBoostSpinsRef.current = totalRotationRef.current
-
-        // 바람 파티클 생성
-        const particles: WindParticle[] = Array.from({ length: 20 }, (_, i) => ({
-          id: Date.now() + i,
-          y: Math.random() * 100,
-          delay: Math.random() * 0.5,
-        }))
-        setWindParticles(particles)
-
-        if (navigator.vibrate) {
-          navigator.vibrate([200, 100, 200])
-        }
-      }
-    } else if (timeLeft <= windEventTime - WIND_EVENT_DURATION && windEventActive) {
-      // 바람 이벤트 종료
-      setWindEventActive(false)
-      setWindEventUsed(true)
-      setWindParticles([])
-
-      // 바람 이벤트 중 획득한 회전수 계산
-      const boostSpins = totalRotationRef.current - windBoostSpinsRef.current
-      setWindBoostSpins(boostSpins)
-    }
-  }, [timeLeft, windEventTime, windEventActive, windEventUsed, gameState])
-
-  // Game loop
+  // ==================== Game Loop ====================
   useEffect(() => {
     if (gameState !== 'playing') return
 
@@ -325,43 +221,42 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
       const deltaTime = (timestamp - lastTimeRef.current) / 1000
       lastTimeRef.current = timestamp
 
-      velocityRef.current *= FRICTION
+      // 마찰 적용 (손을 뗐을 때 빠르게 감속)
+      angularVelocityRef.current *= FRICTION
 
-      if (Math.abs(velocityRef.current) < 0.5) {
-        velocityRef.current = 0
+      if (Math.abs(angularVelocityRef.current) < 0.3) {
+        angularVelocityRef.current = 0
       }
 
-      const newRotation = rotation + velocityRef.current
+      // 회전 업데이트 (반시계방향 = 음수 회전)
+      const newRotation = rotation - angularVelocityRef.current
       setRotation(newRotation)
 
-      totalRotationRef.current += Math.abs(velocityRef.current)
-      const newTotalSpins = totalRotationRef.current / 360
-      setTotalSpins(newTotalSpins)
+      // 총 회전수 누적
+      totalRotationRef.current += Math.abs(angularVelocityRef.current)
+      setTotalSpins(totalRotationRef.current / 360)
 
-      const currentRpm = Math.min(Math.abs(velocityRef.current) * 8, MAX_RPM)
+      // RPM 계산
+      const currentRpm = Math.min(Math.abs(angularVelocityRef.current) * 10, MAX_RPM)
       setRpm(currentRpm)
 
+      // 최고 RPM 업데이트
       if (currentRpm > gameStats.maxRpm) {
         setGameStats(prev => ({ ...prev, maxRpm: Math.floor(currentRpm) }))
       }
 
+      // 콤보 시스템
       const inComboZone = (currentRpm / MAX_RPM) * 100 >= COMBO_ZONE_THRESHOLD
-
       if (currentRpm >= MIN_RPM_FOR_COMBO && inComboZone) {
         setComboTime(prev => prev + deltaTime)
-
         const newComboCount = Math.floor(comboTime + deltaTime)
         if (newComboCount > comboCountRef.current) {
           comboCountRef.current = newComboCount
           setComboCount(newComboCount)
-
           if (newComboCount >= 50 && !goldenGlow) {
             setGoldenGlow(true)
-            if (navigator.vibrate) {
-              navigator.vibrate([100, 50, 100])
-            }
+            navigator.vibrate?.([100, 50, 100])
           }
-
           if (newComboCount > gameStats.maxCombo) {
             setGameStats(prev => ({ ...prev, maxCombo: newComboCount }))
           }
@@ -373,18 +268,14 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
         setGoldenGlow(false)
       }
 
-      // Spark effects
+      // 스파크 효과
       if (currentRpm > 150 && Math.random() < 0.4) {
         const angle = Math.random() * 360
-        const radius = TRACK_RADIUS + Math.random() * 5
-        const spark: Spark = {
+        setSparks(prev => [...prev.slice(-12), {
           id: Date.now() + Math.random(),
-          x: 50 + Math.cos(angle * Math.PI / 180) * radius,
-          y: 50 + Math.sin(angle * Math.PI / 180) * radius,
-          angle,
-        }
-        setSparks(prev => [...prev.slice(-15), spark])
-
+          x: 50 + Math.cos(angle * Math.PI / 180) * BLADE_LENGTH_PERCENT,
+          y: 50 + Math.sin(angle * Math.PI / 180) * BLADE_LENGTH_PERCENT,
+        }])
         if (currentRpm > 200 && !shake) {
           setShake(true)
           setTimeout(() => setShake(false), 100)
@@ -395,18 +286,14 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     }
 
     animationRef.current = requestAnimationFrame(gameLoop)
-
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
+      if (animationRef.current) cancelAnimationFrame(animationRef.current)
     }
   }, [gameState, rotation, shake, comboTime, goldenGlow, gameStats.maxRpm, gameStats.maxCombo])
 
-  // Timer
+  // ==================== Timer ====================
   useEffect(() => {
     if (gameState !== 'playing') return
-
     const timer = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
@@ -416,38 +303,58 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
         return prev - 1
       })
     }, 1000)
-
     return () => clearInterval(timer)
   }, [gameState])
 
-  // Calculate final stats when game ends
+  // ==================== Wind Event ====================
+  useEffect(() => {
+    if (gameState === 'playing' && !windEventUsed && windEventTime === null) {
+      const randomTime = Math.floor(Math.random() * (WIND_EVENT_MAX_TIME - WIND_EVENT_MIN_TIME)) + WIND_EVENT_MIN_TIME
+      setWindEventTime(GAME_DURATION - randomTime)
+    }
+  }, [gameState, windEventUsed, windEventTime])
+
+  useEffect(() => {
+    if (gameState !== 'playing' || windEventTime === null || windEventUsed) return
+
+    if (timeLeft <= windEventTime && timeLeft > windEventTime - WIND_EVENT_DURATION) {
+      if (!windEventActive) {
+        setWindEventActive(true)
+        windBoostSpinsRef.current = totalRotationRef.current
+        setWindParticles(Array.from({ length: 15 }, (_, i) => ({
+          id: Date.now() + i,
+          y: Math.random() * 100,
+          delay: Math.random() * 0.3,
+        })))
+        navigator.vibrate?.([200, 100, 200])
+      }
+    } else if (timeLeft <= windEventTime - WIND_EVENT_DURATION && windEventActive) {
+      setWindEventActive(false)
+      setWindEventUsed(true)
+      setWindParticles([])
+      setWindBoostSpins(totalRotationRef.current - windBoostSpinsRef.current)
+    }
+  }, [timeLeft, windEventTime, windEventActive, windEventUsed, gameState])
+
+  // ==================== Final Stats ====================
   useEffect(() => {
     if (gameState === 'finished') {
-      const comboTier = getCurrentComboTier()
+      const comboTier = COMBO_TIERS.find(t => comboTime >= t.time)
       const multiplier = comboTier?.multiplier || 1
       const baseExp = Math.floor(totalSpins / SPINS_PER_EXP)
       const comboBonus = Math.floor(gameStats.maxCombo / 10)
-      const deviationPenalty = gameStats.deviations
-      const finalExp = Math.max(0, Math.floor((baseExp + comboBonus) * multiplier) - deviationPenalty)
+      const finalExp = Math.max(0, Math.floor((baseExp + comboBonus) * multiplier))
 
-      // 바람 이벤트 활용도 계산 (최대 가능 회전수 대비 실제 획득)
-      const maxPossibleWindSpins = WIND_EVENT_DURATION * 60 * WIND_BOOST_MULTIPLIER
-      const windUsage = windEventUsed ? Math.min(100, Math.floor((windBoostSpins / 360 / maxPossibleWindSpins) * 100 * 50)) : 0
-
-      // MWh 계산 (1회전 = 0.001 MWh 가정)
+      const maxWindSpins = WIND_EVENT_DURATION * 60 * WIND_BOOST_MULTIPLIER
+      const windUsage = windEventUsed ? Math.min(100, Math.floor((windBoostSpins / 360 / maxWindSpins) * 100 * 50)) : 0
       const totalMWh = Math.floor(totalSpins * 0.001 * 100) / 100
 
       setEarnedExp(finalExp)
-      setGameStats(prev => ({
-        ...prev,
-        totalSpins: Math.floor(totalSpins),
-        windBoostUsage: windUsage,
-        totalMWh,
-      }))
+      setGameStats(prev => ({ ...prev, totalSpins: Math.floor(totalSpins), windBoostUsage: windUsage, totalMWh }))
     }
-  }, [gameState, totalSpins, getCurrentComboTier, gameStats.maxCombo, gameStats.deviations, windEventUsed, windBoostSpins])
+  }, [gameState, totalSpins, comboTime, gameStats.maxCombo, windEventUsed, windBoostSpins])
 
-  // Start game
+  // ==================== Game Control ====================
   const startGame = () => {
     setGameState('playing')
     setTimeLeft(GAME_DURATION)
@@ -460,35 +367,29 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     setSparks([])
     setGoldenGlow(false)
     setShowStartGuide(true)
-    setHasStartedDragging(false)
+    setIsDragging(false)
     setWindEventActive(false)
     setWindEventUsed(false)
     setWindEventTime(null)
     setWindParticles([])
     setWindBoostSpins(0)
-    setGameStats({
-      totalSpins: 0,
-      maxRpm: 0,
-      maxCombo: 0,
-      deviations: 0,
-      windBoostUsage: 0,
-      totalMWh: 0,
-    })
-    velocityRef.current = 0
+    setGameStats({ totalSpins: 0, maxRpm: 0, maxCombo: 0, deviations: 0, windBoostUsage: 0, totalMWh: 0 })
+    angularVelocityRef.current = 0
     totalRotationRef.current = 0
     lastTimeRef.current = 0
     comboCountRef.current = 0
     windBoostSpinsRef.current = 0
+    lastAngleRef.current = null
+    pointerIdRef.current = null
   }
 
   const handleRecordExp = () => {
-    if (earnedExp > 0) {
-      onEarnExp(earnedExp)
-    }
+    if (earnedExp > 0) onEarnExp(earnedExp)
     onClose()
     setGameState('ready')
   }
 
+  // ==================== Visual Helpers ====================
   const getBlurIntensity = () => {
     if (rpm < 50) return 0
     if (rpm < 100) return 1
@@ -508,7 +409,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
 
   const rpmPercent = Math.min((rpm / MAX_RPM) * 100, 100)
   const inComboZone = rpmPercent >= COMBO_ZONE_THRESHOLD
-  const comboTier = getCurrentComboTier()
+  const comboTier = COMBO_TIERS.find(t => comboTime >= t.time)
   const titleInfo = gameState === 'finished' ? getTitleByStats(gameStats) : null
 
   if (!isOpen) return null
@@ -527,35 +428,30 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
           onClick={gameState === 'ready' ? onClose : undefined}
         />
 
-        {/* Deviation Flash */}
+        {/* Wind Particles */}
         <AnimatePresence>
-          {deviationFlash && (
+          {windEventActive && windParticles.map(p => (
             <motion.div
-              className="absolute inset-0 bg-red-500/30 z-10 pointer-events-none"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: [0, 1, 0] }}
-              transition={{ duration: 0.4 }}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* Wind Event Particles */}
-        <AnimatePresence>
-          {windEventActive && windParticles.map(particle => (
-            <motion.div
-              key={particle.id}
-              className="absolute left-0 w-20 h-1 bg-gradient-to-r from-transparent via-green-400 to-transparent z-20 pointer-events-none"
-              style={{ top: `${particle.y}%` }}
+              key={p.id}
+              className="absolute left-0 w-24 h-1 bg-gradient-to-r from-transparent via-green-400 to-transparent z-20 pointer-events-none"
+              style={{ top: `${p.y}%` }}
               initial={{ x: '-100%', opacity: 0 }}
               animate={{ x: '100vw', opacity: [0, 1, 1, 0] }}
-              transition={{
-                duration: 1.5,
-                delay: particle.delay,
-                repeat: Infinity,
-                ease: 'linear',
-              }}
+              transition={{ duration: 1.2, delay: p.delay, repeat: Infinity, ease: 'linear' }}
             />
           ))}
+        </AnimatePresence>
+
+        {/* Wrong Direction Flash */}
+        <AnimatePresence>
+          {showWrongDirection && (
+            <motion.div
+              className="absolute inset-0 bg-orange-500/20 z-10 pointer-events-none"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+          )}
         </AnimatePresence>
 
         {/* Game Container */}
@@ -573,10 +469,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
           }}
         >
           {gameState !== 'playing' && (
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-4 z-20 text-slate-400 hover:text-white"
-            >
+            <button onClick={onClose} className="absolute top-4 right-4 z-20 text-slate-400 hover:text-white">
               <X className="w-6 h-6" />
             </button>
           )}
@@ -591,35 +484,26 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
 
           {/* Ready State */}
           {gameState === 'ready' && (
-            <motion.div
-              className="p-6 text-center"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
+            <motion.div className="p-6 text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-kepco-blue to-kepco-cyan flex items-center justify-center">
-                <Wind className="w-10 h-10 text-white" />
+                <RotateCcw className="w-10 h-10 text-white" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">풍력발전기를 돌려라!</h3>
+              <h3 className="text-xl font-bold text-white mb-2">반시계방향으로 돌려라!</h3>
               <p className="text-slate-400 mb-4 text-sm">
-                날개 끝을 잡고 원을 그리며 스와이프!<br />
+                트랙 영역을 터치하고 <span className="text-cyan-400 font-bold">반시계방향</span>으로 스와이프!<br />
                 <span className="text-green-400">돌풍 이벤트</span>를 놓치지 마세요!
               </p>
 
               <div className="bg-white/5 rounded-xl p-4 mb-4 text-left space-y-2">
                 <div className="flex items-center gap-2 text-xs">
+                  <RotateCcw className="w-4 h-4 text-cyan-400" />
+                  <span className="text-cyan-400">반시계방향</span>
+                  <span className="text-slate-400">- 이 방향으로만 가속!</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
                   <div className="w-3 h-3 rounded-full bg-green-400" />
                   <span className="text-green-400">돌풍 이벤트</span>
                   <span className="text-slate-400">- 5초간 RPM 2배!</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <div className="w-3 h-3 rounded-full bg-yellow-400" />
-                  <span className="text-yellow-400">콤보 존</span>
-                  <span className="text-slate-400">- RPM 70% 이상 유지</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <div className="w-3 h-3 rounded-full bg-red-400" />
-                  <span className="text-red-400">경로 이탈</span>
-                  <span className="text-slate-400">- 트랙 밖으로 나가면 패널티</span>
                 </div>
               </div>
 
@@ -641,9 +525,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
               <div className="flex justify-between items-center mb-3">
                 <div className={`text-center ${timeLeft <= 10 ? 'animate-pulse' : ''}`}>
                   <p className="text-[10px] text-slate-500">남은 시간</p>
-                  <p className={`text-xl font-bold ${timeLeft <= 10 ? 'text-red-400' : 'text-white'}`}>
-                    {timeLeft}s
-                  </p>
+                  <p className={`text-xl font-bold ${timeLeft <= 10 ? 'text-red-400' : 'text-white'}`}>{timeLeft}s</p>
                 </div>
 
                 <div className="text-center">
@@ -654,9 +536,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                       animate={comboTier.glow ? { scale: [1, 1.05, 1] } : {}}
                       transition={{ duration: 0.3, repeat: Infinity }}
                     >
-                      <p className="text-[10px] font-bold" style={{ color: comboTier.color }}>
-                        {comboTier.name}
-                      </p>
+                      <p className="text-[10px] font-bold" style={{ color: comboTier.color }}>{comboTier.name}</p>
                       <p className="text-lg font-black text-white">x{comboTier.multiplier}</p>
                     </motion.div>
                   ) : (
@@ -678,9 +558,9 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                 {windEventActive && (
                   <motion.div
                     className="mb-3 py-2 px-4 rounded-xl bg-gradient-to-r from-green-500/30 via-emerald-500/30 to-green-500/30 border border-green-400/50"
-                    initial={{ opacity: 0, y: -20, scale: 0.9 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -20, scale: 0.9 }}
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
                   >
                     <motion.div
                       className="flex items-center justify-center gap-2"
@@ -702,24 +582,19 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                     <Flame className="w-4 h-4" style={{ color: getGlowColor() }} />
                     <span className="text-xs text-slate-400">RPM</span>
                   </div>
-                  <span className="text-lg font-bold" style={{ color: getGlowColor() }}>
-                    {Math.floor(rpm)}
-                  </span>
+                  <span className="text-lg font-bold" style={{ color: getGlowColor() }}>{Math.floor(rpm)}</span>
                 </div>
-
                 <div className="relative h-4 bg-slate-900 rounded-full overflow-hidden">
                   <div
                     className="absolute right-0 h-full bg-yellow-500/20 border-l-2 border-yellow-500/50"
                     style={{ width: `${100 - COMBO_ZONE_THRESHOLD}%` }}
                   />
                   <motion.div
-                    className="absolute left-0 h-full rounded-full transition-all duration-100"
+                    className="absolute left-0 h-full rounded-full"
                     style={{
                       width: `${rpmPercent}%`,
                       background: windEventActive
                         ? 'linear-gradient(90deg, #00FF88, #00D4FF)'
-                        : goldenGlow
-                        ? 'linear-gradient(90deg, #FFD700, #FFA500)'
                         : `linear-gradient(90deg, #00D4FF, ${getGlowColor()})`,
                       boxShadow: `0 0 15px ${getGlowColor()}`,
                     }}
@@ -736,81 +611,48 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                 </div>
               </div>
 
-              {/* Golden Glow Indicator */}
-              <AnimatePresence>
-                {goldenGlow && (
-                  <motion.div
-                    className="mb-2 text-center py-1 rounded-lg bg-gradient-to-r from-yellow-500/20 via-orange-500/20 to-yellow-500/20"
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                  >
-                    <span className="text-xs font-bold text-yellow-400 flex items-center justify-center gap-1">
-                      <Award className="w-4 h-4" /> 50+ COMBO!
-                    </span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Deviation Warning */}
-              <AnimatePresence>
-                {showDeviation && (
-                  <motion.div
-                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: [1, 1.2, 1], opacity: 1 }}
-                    exit={{ scale: 0, opacity: 0 }}
-                  >
-                    <div className="bg-red-500/90 px-6 py-3 rounded-xl text-white font-bold flex items-center gap-2">
-                      <AlertTriangle className="w-6 h-6" />
-                      경로 이탈!
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Turbine Area */}
+              {/* Turbine Container - Pointer Events */}
               <div
                 ref={containerRef}
-                className="relative w-full aspect-square rounded-2xl bg-slate-900/50 border border-white/5 overflow-hidden touch-none select-none"
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
+                className="relative w-full aspect-square rounded-2xl bg-slate-900/50 border border-white/5 overflow-hidden"
+                style={{
+                  touchAction: 'none',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  cursor: isDragging ? 'grabbing' : 'grab',
+                }}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
+                onPointerLeave={handlePointerUp}
               >
-                {/* Background glow */}
+                {/* Background Glow */}
                 <div
-                  className="absolute inset-0 rounded-full opacity-30 transition-all duration-300"
-                  style={{
-                    background: `radial-gradient(circle, ${getGlowColor()}40 0%, transparent 70%)`,
-                  }}
+                  className="absolute inset-0 rounded-full opacity-30"
+                  style={{ background: `radial-gradient(circle, ${getGlowColor()}40 0%, transparent 70%)` }}
                 />
 
-                {/* Swipe Track - 날개 끝 반경과 동기화 */}
+                {/* Hitbox Track (확장된 터치 영역) */}
                 <div
-                  className="absolute rounded-full transition-colors duration-300"
+                  className="absolute rounded-full border-4 border-dashed transition-colors duration-300"
                   style={{
-                    left: `${50 - TRACK_RADIUS - TRACK_WIDTH / 2}%`,
-                    top: `${50 - TRACK_RADIUS - TRACK_WIDTH / 2}%`,
-                    width: `${(TRACK_RADIUS + TRACK_WIDTH / 2) * 2}%`,
-                    height: `${(TRACK_RADIUS + TRACK_WIDTH / 2) * 2}%`,
-                    border: `${TRACK_WIDTH / 2}px solid ${showDeviation ? '#EF444440' : `${getGlowColor()}20`}`,
-                    boxShadow: `inset 0 0 30px ${getGlowColor()}10, 0 0 20px ${showDeviation ? '#EF4444' : getGlowColor()}20`,
+                    left: `${50 - TRACK_OUTER_RADIUS}%`,
+                    top: `${50 - TRACK_OUTER_RADIUS}%`,
+                    width: `${TRACK_OUTER_RADIUS * 2}%`,
+                    height: `${TRACK_OUTER_RADIUS * 2}%`,
+                    borderColor: isDragging ? `${getGlowColor()}80` : `${getGlowColor()}30`,
+                    boxShadow: isDragging ? `0 0 30px ${getGlowColor()}40` : 'none',
                   }}
                 />
-
-                {/* Track center line */}
                 <div
-                  className="absolute rounded-full border-2 border-dashed transition-colors duration-300"
+                  className="absolute rounded-full border-2 border-dashed"
                   style={{
-                    left: `${50 - TRACK_RADIUS}%`,
-                    top: `${50 - TRACK_RADIUS}%`,
-                    width: `${TRACK_RADIUS * 2}%`,
-                    height: `${TRACK_RADIUS * 2}%`,
-                    borderColor: showDeviation ? '#EF4444' : `${getGlowColor()}40`,
+                    left: `${50 - TRACK_INNER_RADIUS}%`,
+                    top: `${50 - TRACK_INNER_RADIUS}%`,
+                    width: `${TRACK_INNER_RADIUS * 2}%`,
+                    height: `${TRACK_INNER_RADIUS * 2}%`,
+                    borderColor: `${getGlowColor()}20`,
                   }}
                 />
 
@@ -831,40 +673,20 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   />
                 ))}
 
-                {/* Integrated Turbine (Tower + Blades) */}
-                <svg
-                  className="absolute inset-0 w-full h-full"
-                  viewBox="0 0 100 100"
-                  style={{ filter: `drop-shadow(0 2px 4px rgba(0,0,0,0.3))` }}
-                >
-                  {/* Tower - 고정 */}
+                {/* Tower (Fixed) */}
+                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100">
                   <defs>
-                    <linearGradient id="towerGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <linearGradient id="towerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
                       <stop offset="0%" stopColor="#94a3b8" />
                       <stop offset="50%" stopColor="#f1f5f9" />
                       <stop offset="100%" stopColor="#94a3b8" />
                     </linearGradient>
-                    <linearGradient id="bladeGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#ffffff" />
-                      <stop offset="100%" stopColor={getGlowColor()} />
-                    </linearGradient>
-                    <filter id="glow">
-                      <feGaussianBlur stdDeviation="1" result="coloredBlur" />
-                      <feMerge>
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
+                    <filter id="shadow">
+                      <feDropShadow dx="1" dy="2" stdDeviation="1" floodOpacity="0.3" />
                     </filter>
                   </defs>
-
-                  {/* Tower base */}
-                  <path
-                    d="M48 50 L46 85 L54 85 L52 50 Z"
-                    fill="url(#towerGradient)"
-                  />
-
-                  {/* Tower top platform */}
-                  <ellipse cx="50" cy="50" rx="6" ry="3" fill="#64748b" />
+                  <path d="M48 50 L46 88 L54 88 L52 50 Z" fill="url(#towerGrad)" filter="url(#shadow)" />
+                  <ellipse cx="50" cy="50" rx="7" ry="3" fill="#64748b" />
                 </svg>
 
                 {/* Rotating Blades */}
@@ -879,78 +701,89 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   <svg className="w-full h-full" viewBox="0 0 100 100">
                     <defs>
                       <linearGradient id="bladeGrad" x1="0%" y1="100%" x2="0%" y2="0%">
-                        <stop offset="0%" stopColor={getGlowColor()} stopOpacity="0.8" />
+                        <stop offset="0%" stopColor={getGlowColor()} stopOpacity="0.9" />
                         <stop offset="100%" stopColor="#ffffff" />
                       </linearGradient>
+                      <filter id="bladeGlow">
+                        <feDropShadow dx="0" dy="0" stdDeviation="2" floodColor={getGlowColor()} floodOpacity="0.5" />
+                      </filter>
                     </defs>
-
-                    {/* Three Blades */}
                     {[0, 120, 240].map((angle, i) => (
                       <g key={i} transform={`rotate(${angle} 50 50)`}>
                         <path
-                          d={`M49 50 L47 ${50 - BLADE_LENGTH_PERCENT} Q50 ${50 - BLADE_LENGTH_PERCENT - 3} 53 ${50 - BLADE_LENGTH_PERCENT} L51 50 Z`}
+                          d={`M49 50 L46 ${50 - BLADE_LENGTH_PERCENT} Q50 ${50 - BLADE_LENGTH_PERCENT - 4} 54 ${50 - BLADE_LENGTH_PERCENT} L51 50 Z`}
                           fill="url(#bladeGrad)"
-                          style={{
-                            filter: rpm > 100 ? `drop-shadow(0 0 ${rpm > 200 ? 8 : 4}px ${getGlowColor()})` : 'none',
-                          }}
+                          filter={rpm > 80 ? 'url(#bladeGlow)' : undefined}
                         />
                       </g>
                     ))}
-
-                    {/* Center Hub */}
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="5"
-                      fill="#334155"
-                      stroke={getGlowColor()}
-                      strokeWidth="1.5"
-                      style={{
-                        filter: `drop-shadow(0 0 10px ${getGlowColor()})`,
-                      }}
-                    />
-                    <circle cx="50" cy="50" r="2" fill={getGlowColor()} />
+                    <circle cx="50" cy="50" r="6" fill="#334155" stroke={getGlowColor()} strokeWidth="2" />
+                    <circle cx="50" cy="50" r="2.5" fill={getGlowColor()} />
                   </svg>
                 </div>
 
-                {/* Start Guide - 날개 끝에 표시 */}
+                {/* Start Guide with CCW Arrow */}
                 <AnimatePresence>
                   {showStartGuide && gameState === 'playing' && (
                     <motion.div
-                      className="absolute z-30 pointer-events-none"
-                      style={{
-                        left: '50%',
-                        top: `${50 - BLADE_LENGTH_PERCENT - 5}%`,
-                        transform: 'translateX(-50%)',
-                      }}
-                      initial={{ opacity: 0, scale: 0 }}
-                      animate={{ opacity: 1, scale: [1, 1.2, 1] }}
-                      exit={{ opacity: 0, scale: 0 }}
-                      transition={{ duration: 0.5, repeat: Infinity }}
+                      className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
                     >
-                      <div className="flex flex-col items-center">
+                      {/* CCW Arrow Animation */}
+                      <motion.div
+                        className="absolute"
+                        style={{
+                          width: `${TRACK_OUTER_RADIUS * 1.8}%`,
+                          height: `${TRACK_OUTER_RADIUS * 1.8}%`,
+                        }}
+                        animate={{ rotate: -360 }}
+                        transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <svg viewBox="0 0 100 100" className="w-full h-full">
+                          <defs>
+                            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                              <polygon points="0 0, 10 3.5, 0 7" fill="#00D4FF" />
+                            </marker>
+                          </defs>
+                          <path
+                            d="M 50 5 A 45 45 0 1 0 95 50"
+                            fill="none"
+                            stroke="#00D4FF"
+                            strokeWidth="3"
+                            strokeDasharray="8 4"
+                            markerEnd="url(#arrowhead)"
+                            opacity="0.8"
+                          />
+                        </svg>
+                      </motion.div>
+
+                      {/* Touch Point Indicator */}
+                      <motion.div
+                        className="absolute flex flex-col items-center"
+                        style={{ top: `${50 - BLADE_LENGTH_PERCENT - 8}%` }}
+                        animate={{ scale: [1, 1.15, 1], opacity: [0.8, 1, 0.8] }}
+                        transition={{ duration: 1, repeat: Infinity }}
+                      >
                         <motion.div
-                          className="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center"
-                          animate={{ boxShadow: ['0 0 10px #FBBF24', '0 0 30px #FBBF24', '0 0 10px #FBBF24'] }}
+                          className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center"
+                          animate={{ boxShadow: ['0 0 15px #00D4FF', '0 0 35px #00D4FF', '0 0 15px #00D4FF'] }}
                           transition={{ duration: 1, repeat: Infinity }}
                         >
-                          <Hand className="w-6 h-6 text-white" />
+                          <RotateCcw className="w-6 h-6 text-white" />
                         </motion.div>
-                        <p className="text-[10px] text-yellow-400 mt-1 whitespace-nowrap">여기를 잡고 돌려요!</p>
-                      </div>
+                        <p className="text-xs text-cyan-400 mt-2 font-bold whitespace-nowrap">반시계방향!</p>
+                      </motion.div>
                     </motion.div>
                   )}
                 </AnimatePresence>
 
-                {/* Touch hint */}
-                {rpm < 10 && !showDeviation && !showStartGuide && (
-                  <motion.p
-                    className="absolute bottom-4 left-0 right-0 text-center text-slate-500 text-xs"
-                    animate={{ opacity: [0.5, 1, 0.5] }}
-                    transition={{ duration: 1.5, repeat: Infinity }}
-                  >
-                    트랙을 따라 스와이프!
-                  </motion.p>
+                {/* Drag Feedback */}
+                {isDragging && (
+                  <div className="absolute bottom-3 left-0 right-0 text-center">
+                    <span className="text-xs text-green-400 font-bold animate-pulse">드래그 중...</span>
+                  </div>
                 )}
               </div>
             </div>
@@ -958,16 +791,10 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
 
           {/* Finished State */}
           {gameState === 'finished' && (
-            <motion.div
-              className="p-6 text-center"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
+            <motion.div className="p-6 text-center" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
               <motion.div
                 className="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center"
-                style={{
-                  background: `linear-gradient(135deg, ${titleInfo?.color}, ${titleInfo?.color}80)`,
-                }}
+                style={{ background: `linear-gradient(135deg, ${titleInfo?.color}, ${titleInfo?.color}80)` }}
                 initial={{ scale: 0 }}
                 animate={{ scale: [0, 1.2, 1], rotate: [0, 360] }}
                 transition={{ duration: 0.6 }}
@@ -976,22 +803,13 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
               </motion.div>
 
               <h3 className="text-xl font-bold text-white mb-1">게임 종료!</h3>
-
               {titleInfo && (
-                <motion.div
-                  className="mb-4"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.3 }}
-                >
-                  <p className="text-lg font-bold" style={{ color: titleInfo.color }}>
-                    "{titleInfo.title}"
-                  </p>
+                <motion.div className="mb-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+                  <p className="text-lg font-bold" style={{ color: titleInfo.color }}>"{titleInfo.title}"</p>
                   <p className="text-xs text-slate-400">{titleInfo.rank}</p>
                 </motion.div>
               )}
 
-              {/* 상세 운전일지 */}
               <div className="bg-white/5 rounded-xl p-4 mb-4 text-left">
                 <p className="text-xs text-slate-500 mb-3 text-center font-medium">운전일지</p>
                 <div className="grid grid-cols-2 gap-2 text-sm">
@@ -1012,7 +830,6 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                     <p className="text-lg font-bold text-blue-400">{gameStats.totalMWh} MWh</p>
                   </div>
                 </div>
-
                 <div className="mt-3 pt-3 border-t border-white/10 flex justify-between items-center">
                   <span className="text-slate-300 font-medium">획득 EXP</span>
                   <span className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
@@ -1051,9 +868,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
           25% { transform: translateX(-5px); }
           75% { transform: translateX(5px); }
         }
-        .animate-shake {
-          animation: shake 0.1s ease-in-out;
-        }
+        .animate-shake { animation: shake 0.1s ease-in-out; }
       `}</style>
     </AnimatePresence>
   )
