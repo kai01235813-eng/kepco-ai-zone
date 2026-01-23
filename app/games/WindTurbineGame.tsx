@@ -53,9 +53,9 @@ const MAX_RPM = 250
 
 // 히트박스 설정 - 더 넓은 스냅 영역
 const BLADE_LENGTH_PERCENT = 38
-const HITBOX_MULTIPLIER = 1.5 // 1.2 → 1.5배로 확장
-const SNAP_INNER_RADIUS = 10 // 중심 근처도 터치 가능 (스냅)
-const TRACK_OUTER_RADIUS = BLADE_LENGTH_PERCENT * HITBOX_MULTIPLIER
+const HITBOX_MULTIPLIER = 1.5 // 1.5배 확장
+const SNAP_INNER_RADIUS = 20 // 중심 데드존 확장 (10 → 20)
+const TRACK_OUTER_RADIUS = BLADE_LENGTH_PERCENT * HITBOX_MULTIPLIER // ~57%
 
 // 바람 이벤트
 const WIND_EVENT_MIN_TIME = 10
