@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Wind, Trophy, BookOpen, Flame, RotateCcw } from 'lucide-react'
+import { X, Wind, Trophy, BookOpen, Flame, RotateCcw, Bug } from 'lucide-react'
 
 // ==================== Types ====================
 interface WindTurbineGameProps {
@@ -32,6 +32,17 @@ interface GameStats {
   totalMWh: number
 }
 
+// 디버그용 터치 정보
+interface DebugTouchInfo {
+  clientX: number
+  clientY: number
+  normalizedX: number
+  normalizedY: number
+  distancePercent: number
+  angle: number
+  isInHitbox: boolean
+}
+
 // ==================== Constants ====================
 const GAME_DURATION = 60
 const FRICTION = 0.94
@@ -40,10 +51,10 @@ const SPINS_PER_EXP = 1000
 const COMBO_ZONE_THRESHOLD = 70
 const MAX_RPM = 250
 
-// 트랙 & 히트박스 설정 - 1.2배 확장
+// 히트박스 설정 - 더 넓은 스냅 영역
 const BLADE_LENGTH_PERCENT = 38
-const HITBOX_MULTIPLIER = 1.2 // 히트박스 1.2배 확장
-const TRACK_INNER_RADIUS = BLADE_LENGTH_PERCENT * 0.5
+const HITBOX_MULTIPLIER = 1.5 // 1.2 → 1.5배로 확장
+const SNAP_INNER_RADIUS = 10 // 중심 근처도 터치 가능 (스냅)
 const TRACK_OUTER_RADIUS = BLADE_LENGTH_PERCENT * HITBOX_MULTIPLIER
 
 // 바람 이벤트
@@ -92,6 +103,10 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
   const [showStartGuide, setShowStartGuide] = useState(true)
   const [isDragging, setIsDragging] = useState(false)
 
+  // Debug mode
+  const [debugMode, setDebugMode] = useState(false)
+  const [debugTouch, setDebugTouch] = useState<DebugTouchInfo | null>(null)
+
   // Wind event
   const [windEventActive, setWindEventActive] = useState(false)
   const [windEventUsed, setWindEventUsed] = useState(false)
@@ -115,34 +130,41 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
   const windBoostSpinsRef = useRef(0)
   const pointerIdRef = useRef<number | null>(null)
 
-  // ==================== Pointer Helpers ====================
-  const getAngleFromCenter = useCallback((clientX: number, clientY: number): number => {
-    if (!containerRef.current) return 0
+  // ==================== 동적 영점 보정 (Dynamic Normalization) ====================
+  // 매 터치마다 실시간으로 컨테이너 위치 재계산
+  const getNormalizedCoords = useCallback((clientX: number, clientY: number) => {
+    if (!containerRef.current) return { x: 0, y: 0, centerX: 0, centerY: 0, radius: 0 }
+
+    // 실시간 getBoundingClientRect - 스크롤/줌 영향 제거
     const rect = containerRef.current.getBoundingClientRect()
     const centerX = rect.left + rect.width / 2
     const centerY = rect.top + rect.height / 2
-    // 반시계방향을 위해 음수 처리
-    return -Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI)
+    const radius = rect.width / 2
+
+    // 정규화된 상대 좌표 (-1 ~ 1)
+    const normalizedX = (clientX - centerX) / radius
+    const normalizedY = (clientY - centerY) / radius
+
+    return { x: normalizedX, y: normalizedY, centerX, centerY, radius }
   }, [])
 
-  const getDistancePercent = useCallback((clientX: number, clientY: number): number => {
-    if (!containerRef.current) return 0
-    const rect = containerRef.current.getBoundingClientRect()
-    const centerX = rect.left + rect.width / 2
-    const centerY = rect.top + rect.height / 2
-    const dx = clientX - centerX
-    const dy = clientY - centerY
-    const distance = Math.sqrt(dx * dx + dy * dy)
-    const maxRadius = rect.width / 2
-    return (distance / maxRadius) * 100
+  const getAngleFromNormalized = useCallback((normalizedX: number, normalizedY: number): number => {
+    // atan2로 각도 계산 (반시계방향 = 양수)
+    return -Math.atan2(normalizedY, normalizedX) * (180 / Math.PI)
   }, [])
 
-  const isInHitbox = useCallback((clientX: number, clientY: number): boolean => {
-    const dist = getDistancePercent(clientX, clientY)
-    return dist >= TRACK_INNER_RADIUS && dist <= TRACK_OUTER_RADIUS
-  }, [getDistancePercent])
+  const getDistanceFromNormalized = useCallback((normalizedX: number, normalizedY: number): number => {
+    // 중심으로부터의 거리 (0 ~ 1+)
+    return Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY) * 100
+  }, [])
 
-  // ==================== Pointer Events (Unified) ====================
+  // 스냅 기능: 넓은 영역에서 터치 시작 가능
+  const isInSnapZone = useCallback((distancePercent: number): boolean => {
+    // 중심 근처(SNAP_INNER_RADIUS)부터 외곽(TRACK_OUTER_RADIUS)까지 모두 유효
+    return distancePercent >= SNAP_INNER_RADIUS && distancePercent <= TRACK_OUTER_RADIUS
+  }, [])
+
+  // ==================== Pointer Events with passive: false ====================
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (gameState !== 'playing') return
     e.preventDefault()
@@ -150,51 +172,87 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
 
     const { clientX, clientY, pointerId } = e
 
-    // 히트박스 체크 (넓은 영역)
-    if (!isInHitbox(clientX, clientY)) return
+    // 동적 좌표 계산
+    const { x: normalizedX, y: normalizedY } = getNormalizedCoords(clientX, clientY)
+    const distancePercent = getDistanceFromNormalized(normalizedX, normalizedY)
+    const angle = getAngleFromNormalized(normalizedX, normalizedY)
+    const inHitbox = isInSnapZone(distancePercent)
 
-    // Pointer Capture - 드래그가 영역 밖으로 나가도 유지
+    // 디버그 정보 업데이트
+    if (debugMode) {
+      setDebugTouch({
+        clientX, clientY, normalizedX, normalizedY,
+        distancePercent, angle, isInHitbox: inHitbox
+      })
+    }
+
+    // 스냅 존 체크
+    if (!inHitbox) return
+
+    // 터치 시작 햅틱 피드백 - 즉각적인 인지
+    navigator.vibrate?.([15])
+
+    // Pointer Capture
     if (containerRef.current) {
       containerRef.current.setPointerCapture(pointerId)
     }
 
     pointerIdRef.current = pointerId
-    lastAngleRef.current = getAngleFromCenter(clientX, clientY)
+    lastAngleRef.current = angle
     setIsDragging(true)
     setShowStartGuide(false)
-  }, [gameState, isInHitbox, getAngleFromCenter])
+  }, [gameState, getNormalizedCoords, getDistanceFromNormalized, getAngleFromNormalized, isInSnapZone, debugMode])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (gameState !== 'playing' || !isDragging) return
+    if (gameState !== 'playing') return
     if (pointerIdRef.current !== e.pointerId) return
     e.preventDefault()
 
     const { clientX, clientY } = e
-    const currentAngle = getAngleFromCenter(clientX, clientY)
+    const { x: normalizedX, y: normalizedY } = getNormalizedCoords(clientX, clientY)
+    const currentAngle = getAngleFromNormalized(normalizedX, normalizedY)
+    const distancePercent = getDistanceFromNormalized(normalizedX, normalizedY)
+
+    // 디버그 정보 실시간 업데이트
+    if (debugMode) {
+      setDebugTouch({
+        clientX, clientY, normalizedX, normalizedY,
+        distancePercent, angle: currentAngle, isInHitbox: isDragging
+      })
+    }
+
+    if (!isDragging) return
 
     if (lastAngleRef.current !== null) {
       let deltaAngle = currentAngle - lastAngleRef.current
 
-      // 각도 래핑 처리 (-180 ~ 180)
+      // 각도 래핑 (-180 ~ 180)
       if (deltaAngle > 180) deltaAngle -= 360
       if (deltaAngle < -180) deltaAngle += 360
 
       // 반시계방향(CCW) = 양수 deltaAngle
-      if (deltaAngle > 0) {
+      if (deltaAngle > 0.5) {
         // 반시계방향 - 가속!
         const boost = windEventActive ? WIND_BOOST_MULTIPLIER : 1
-        angularVelocityRef.current += deltaAngle * 0.6 * boost
+        // 속도 감쇠 없이 직접 적용
+        angularVelocityRef.current += deltaAngle * 0.8 * boost
         setShowWrongDirection(false)
-      } else if (deltaAngle < -5) {
-        // 시계방향 - 저항 (강한 감속)
-        angularVelocityRef.current *= 0.7
+
+        // 드래그 중 미세 햅틱 (RPM 비례)
+        if (rpm > 100 && Math.random() < 0.1) {
+          navigator.vibrate?.([5])
+        }
+      } else if (deltaAngle < -3) {
+        // 시계방향 - 저항
+        angularVelocityRef.current *= 0.6
         setShowWrongDirection(true)
+        navigator.vibrate?.([30, 20, 30])
         setTimeout(() => setShowWrongDirection(false), 300)
       }
     }
 
     lastAngleRef.current = currentAngle
-  }, [gameState, isDragging, getAngleFromCenter, windEventActive])
+  }, [gameState, isDragging, getNormalizedCoords, getAngleFromNormalized, getDistanceFromNormalized, windEventActive, debugMode, rpm])
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (pointerIdRef.current !== e.pointerId) return
@@ -206,11 +264,34 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     pointerIdRef.current = null
     lastAngleRef.current = null
     setIsDragging(false)
-  }, [])
+
+    if (debugMode) {
+      setDebugTouch(null)
+    }
+  }, [debugMode])
 
   const handlePointerCancel = useCallback((e: React.PointerEvent) => {
     handlePointerUp(e)
   }, [handlePointerUp])
+
+  // Native touch event listener with passive: false
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || gameState !== 'playing') return
+
+    const preventScroll = (e: TouchEvent) => {
+      e.preventDefault()
+    }
+
+    // passive: false로 브라우저 기본 제스처 완전 차단
+    container.addEventListener('touchstart', preventScroll, { passive: false })
+    container.addEventListener('touchmove', preventScroll, { passive: false })
+
+    return () => {
+      container.removeEventListener('touchstart', preventScroll)
+      container.removeEventListener('touchmove', preventScroll)
+    }
+  }, [gameState])
 
   // ==================== Game Loop ====================
   useEffect(() => {
@@ -221,14 +302,14 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
       const deltaTime = (timestamp - lastTimeRef.current) / 1000
       lastTimeRef.current = timestamp
 
-      // 마찰 적용 (손을 뗐을 때 빠르게 감속)
+      // 마찰 적용
       angularVelocityRef.current *= FRICTION
 
       if (Math.abs(angularVelocityRef.current) < 0.3) {
         angularVelocityRef.current = 0
       }
 
-      // 회전 업데이트 (반시계방향 = 음수 회전)
+      // 회전 업데이트 (반시계방향 = 음수)
       const newRotation = rotation - angularVelocityRef.current
       setRotation(newRotation)
 
@@ -374,6 +455,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
     setWindParticles([])
     setWindBoostSpins(0)
     setGameStats({ totalSpins: 0, maxRpm: 0, maxCombo: 0, deviations: 0, windBoostUsage: 0, totalMWh: 0 })
+    setDebugTouch(null)
     angularVelocityRef.current = 0
     totalRotationRef.current = 0
     lastTimeRef.current = 0
@@ -454,6 +536,31 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
           )}
         </AnimatePresence>
 
+        {/* Debug Mode Panel */}
+        {debugMode && gameState === 'playing' && (
+          <div className="absolute top-4 left-4 z-50 bg-black/80 rounded-lg p-3 text-xs font-mono text-green-400 min-w-[200px]">
+            <div className="text-yellow-400 font-bold mb-2">DEBUG MODE</div>
+            {debugTouch ? (
+              <>
+                <div>Client: ({debugTouch.clientX.toFixed(0)}, {debugTouch.clientY.toFixed(0)})</div>
+                <div>Normalized: ({debugTouch.normalizedX.toFixed(3)}, {debugTouch.normalizedY.toFixed(3)})</div>
+                <div>Distance: {debugTouch.distancePercent.toFixed(1)}%</div>
+                <div className="text-cyan-400">Angle: {debugTouch.angle.toFixed(1)}°</div>
+                <div className={debugTouch.isInHitbox ? 'text-green-400' : 'text-red-400'}>
+                  Hitbox: {debugTouch.isInHitbox ? 'IN' : 'OUT'}
+                </div>
+              </>
+            ) : (
+              <div className="text-slate-500">No touch detected</div>
+            )}
+            <div className="mt-2 pt-2 border-t border-white/20">
+              <div>RPM: {rpm.toFixed(1)}</div>
+              <div>Velocity: {angularVelocityRef.current.toFixed(2)}</div>
+              <div>Dragging: {isDragging ? 'YES' : 'NO'}</div>
+            </div>
+          </div>
+        )}
+
         {/* Game Container */}
         <motion.div
           className={`relative w-full max-w-md bg-gradient-to-b from-slate-900 to-slate-950 rounded-3xl overflow-hidden border border-white/10 ${shake ? 'animate-shake' : ''}`}
@@ -468,11 +575,22 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
               : `0 0 60px ${getGlowColor()}40`,
           }}
         >
-          {gameState !== 'playing' && (
-            <button onClick={onClose} className="absolute top-4 right-4 z-20 text-slate-400 hover:text-white">
-              <X className="w-6 h-6" />
-            </button>
-          )}
+          {/* Close & Debug Buttons */}
+          <div className="absolute top-4 right-4 z-20 flex gap-2">
+            {gameState === 'playing' && (
+              <button
+                onClick={() => setDebugMode(prev => !prev)}
+                className={`p-2 rounded-lg transition-colors ${debugMode ? 'bg-yellow-500/30 text-yellow-400' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <Bug className="w-5 h-5" />
+              </button>
+            )}
+            {gameState !== 'playing' && (
+              <button onClick={onClose} className="text-slate-400 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+            )}
+          </div>
 
           {/* Header */}
           <div className="p-4 border-b border-white/10">
@@ -611,7 +729,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                 </div>
               </div>
 
-              {/* Turbine Container - Pointer Events */}
+              {/* Turbine Container */}
               <div
                 ref={containerRef}
                 className="relative w-full aspect-square rounded-2xl bg-slate-900/50 border border-white/5 overflow-hidden"
@@ -619,6 +737,7 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   touchAction: 'none',
                   userSelect: 'none',
                   WebkitUserSelect: 'none',
+                  WebkitTouchCallout: 'none',
                   cursor: isDragging ? 'grabbing' : 'grab',
                 }}
                 onPointerDown={handlePointerDown}
@@ -633,26 +752,65 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                   style={{ background: `radial-gradient(circle, ${getGlowColor()}40 0%, transparent 70%)` }}
                 />
 
-                {/* Hitbox Track (확장된 터치 영역) */}
+                {/* Debug: Touch Point Visualization */}
+                {debugMode && debugTouch && (
+                  <>
+                    {/* 터치 지점 빨간 점 */}
+                    <div
+                      className="absolute w-4 h-4 rounded-full bg-red-500 border-2 border-white z-50 pointer-events-none"
+                      style={{
+                        left: `${(debugTouch.normalizedX + 1) * 50}%`,
+                        top: `${(debugTouch.normalizedY + 1) * 50}%`,
+                        transform: 'translate(-50%, -50%)',
+                        boxShadow: '0 0 10px red',
+                      }}
+                    />
+                    {/* 중심축 */}
+                    <div
+                      className="absolute w-3 h-3 rounded-full bg-yellow-400 z-50 pointer-events-none"
+                      style={{
+                        left: '50%',
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                      }}
+                    />
+                    {/* 중심-터치 연결선 */}
+                    <svg className="absolute inset-0 w-full h-full z-40 pointer-events-none">
+                      <line
+                        x1="50%"
+                        y1="50%"
+                        x2={`${(debugTouch.normalizedX + 1) * 50}%`}
+                        y2={`${(debugTouch.normalizedY + 1) * 50}%`}
+                        stroke={debugTouch.isInHitbox ? '#00FF00' : '#FF0000'}
+                        strokeWidth="2"
+                        strokeDasharray="4 2"
+                      />
+                    </svg>
+                  </>
+                )}
+
+                {/* Hitbox Visualization */}
                 <div
-                  className="absolute rounded-full border-4 border-dashed transition-colors duration-300"
+                  className="absolute rounded-full border-4 transition-all duration-150"
                   style={{
                     left: `${50 - TRACK_OUTER_RADIUS}%`,
                     top: `${50 - TRACK_OUTER_RADIUS}%`,
                     width: `${TRACK_OUTER_RADIUS * 2}%`,
                     height: `${TRACK_OUTER_RADIUS * 2}%`,
-                    borderColor: isDragging ? `${getGlowColor()}80` : `${getGlowColor()}30`,
-                    boxShadow: isDragging ? `0 0 30px ${getGlowColor()}40` : 'none',
+                    borderColor: isDragging ? `${getGlowColor()}90` : debugMode ? 'rgba(255,255,0,0.5)' : `${getGlowColor()}30`,
+                    borderStyle: debugMode ? 'solid' : 'dashed',
+                    boxShadow: isDragging ? `0 0 40px ${getGlowColor()}60` : 'none',
                   }}
                 />
                 <div
-                  className="absolute rounded-full border-2 border-dashed"
+                  className="absolute rounded-full border-2"
                   style={{
-                    left: `${50 - TRACK_INNER_RADIUS}%`,
-                    top: `${50 - TRACK_INNER_RADIUS}%`,
-                    width: `${TRACK_INNER_RADIUS * 2}%`,
-                    height: `${TRACK_INNER_RADIUS * 2}%`,
-                    borderColor: `${getGlowColor()}20`,
+                    left: `${50 - SNAP_INNER_RADIUS}%`,
+                    top: `${50 - SNAP_INNER_RADIUS}%`,
+                    width: `${SNAP_INNER_RADIUS * 2}%`,
+                    height: `${SNAP_INNER_RADIUS * 2}%`,
+                    borderColor: debugMode ? 'rgba(255,0,255,0.5)' : `${getGlowColor()}20`,
+                    borderStyle: debugMode ? 'solid' : 'dashed',
                   }}
                 />
 
@@ -735,8 +893,8 @@ export default function WindTurbineGame({ isOpen, onClose, onEarnExp }: WindTurb
                       <motion.div
                         className="absolute"
                         style={{
-                          width: `${TRACK_OUTER_RADIUS * 1.8}%`,
-                          height: `${TRACK_OUTER_RADIUS * 1.8}%`,
+                          width: `${TRACK_OUTER_RADIUS * 1.6}%`,
+                          height: `${TRACK_OUTER_RADIUS * 1.6}%`,
                         }}
                         animate={{ rotate: -360 }}
                         transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
