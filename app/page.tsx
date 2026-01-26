@@ -34,6 +34,12 @@ import {
   Newspaper,
   ExternalLink,
   Wind,
+  Wrench,
+  BookOpen,
+  Code2,
+  Video,
+  Music,
+  ShieldAlert,
 } from 'lucide-react'
 
 // Games
@@ -113,6 +119,31 @@ const TIME_SLOTS: { id: TimeSlot; name: string; startHour: number; endHour: numb
   { id: 'lunch', name: '점심', startHour: 11, endHour: 13, icon: '🍱' },
   { id: 'evening', name: '퇴근', startHour: 17, endHour: 19, icon: '🌆' },
 ]
+
+// AI TOOL 설정
+interface AITool {
+  id: string
+  name: string
+  category: string
+  url: string
+  bgClass: string
+  hoverShadow: string
+  icon: 'BookOpen' | 'Code2' | 'Video' | 'Music'
+}
+
+const AI_TOOLS: AITool[] = [
+  { id: 'notebooklm', name: 'NotebookLM', category: '자료조사', url: 'https://notebooklm.google/', bgClass: 'bg-blue-500/20 hover:bg-blue-500/30', hoverShadow: 'rgba(59, 130, 246, 0.4)', icon: 'BookOpen' },
+  { id: 'claude-code', name: 'Claude Code / AI Studio', category: '바이브코딩', url: 'https://code.claude.com/', bgClass: 'bg-purple-500/20 hover:bg-purple-500/30', hoverShadow: 'rgba(168, 85, 247, 0.4)', icon: 'Code2' },
+  { id: 'invideo', name: 'Invideo', category: '영상생성', url: 'https://ai.invideo.io', bgClass: 'bg-red-500/20 hover:bg-red-500/30', hoverShadow: 'rgba(239, 68, 68, 0.4)', icon: 'Video' },
+  { id: 'suno', name: 'Suno AI', category: '음악생성', url: 'https://suno.com/', bgClass: 'bg-green-500/20 hover:bg-green-500/30', hoverShadow: 'rgba(34, 197, 94, 0.4)', icon: 'Music' },
+]
+
+const AI_TOOL_CLICK_KEY = 'kepco_ai_tool_click'
+
+interface AIToolClickRecord {
+  date: string
+  clickedTools: string[]
+}
 
 // ==================== Animation Variants ====================
 const pageTransition = {
@@ -197,6 +228,22 @@ const getLinkClickRecord = (): LinkClickRecord => {
 
 const saveLinkClickRecord = (record: LinkClickRecord) => {
   localStorage.setItem(LINK_CLICK_KEY, JSON.stringify(record))
+}
+
+const getAIToolClickRecord = (): AIToolClickRecord => {
+  if (typeof window === 'undefined') return { date: '', clickedTools: [] }
+  const stored = localStorage.getItem(AI_TOOL_CLICK_KEY)
+  if (stored) {
+    const record = JSON.parse(stored)
+    if (record.date === getTodayKey()) {
+      return record
+    }
+  }
+  return { date: getTodayKey(), clickedTools: [] }
+}
+
+const saveAIToolClickRecord = (record: AIToolClickRecord) => {
+  localStorage.setItem(AI_TOOL_CLICK_KEY, JSON.stringify(record))
 }
 
 const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -553,6 +600,140 @@ const LinkExpCelebration = ({ show, onComplete }: { show: boolean; onComplete: (
         </motion.p>
       </motion.div>
     </motion.div>
+  )
+}
+
+// ==================== AI Tool EXP Toast ====================
+const AIToolExpToast = ({ show, onComplete }: { show: boolean; onComplete: () => void }) => {
+  useEffect(() => {
+    if (show) {
+      const timer = setTimeout(onComplete, 2500)
+      return () => clearTimeout(timer)
+    }
+  }, [show, onComplete])
+
+  if (!show) return null
+
+  return (
+    <motion.div
+      className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[450] pointer-events-none"
+      initial={{ opacity: 0, y: 20, scale: 0.9 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -10, scale: 0.9 }}
+    >
+      <div className="glass-strong rounded-2xl px-6 py-4 shadow-2xl border border-green-500/30">
+        <div className="flex items-center gap-3">
+          <motion.div
+            className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center"
+            animate={{ scale: [1, 1.2, 1] }}
+            transition={{ duration: 0.5, repeat: 2 }}
+          >
+            <Sparkles className="w-5 h-5 text-white" />
+          </motion.div>
+          <div>
+            <p className="text-green-400 font-semibold text-sm" style={{ wordBreak: 'keep-all' }}>오늘의 AI 학습 포인트</p>
+            <p className="text-white font-bold">+{EXP_LINK_CLICK} EXP 지급 완료!</p>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+// ==================== Security Consent Modal ====================
+interface SecurityConsentModalProps {
+  isOpen: boolean
+  onClose: () => void
+  onConfirm: () => void
+  toolName: string
+}
+
+const SecurityConsentModal = ({ isOpen, onClose, onConfirm, toolName }: SecurityConsentModalProps) => {
+  if (!isOpen) return null
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-[500] flex items-center justify-center p-4"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        {/* Backdrop */}
+        <motion.div
+          className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+          onClick={onClose}
+        />
+
+        {/* Modal */}
+        <motion.div
+          className="relative glass-strong rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-yellow-500/30"
+          initial={{ scale: 0.9, y: 20 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.9, y: 20 }}
+          transition={springConfig}
+        >
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-500 to-orange-500 flex items-center justify-center">
+              <ShieldAlert className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-white" style={{ wordBreak: 'keep-all' }}>보안 준수 확인</h3>
+              <p className="text-xs text-slate-400">{toolName}</p>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="space-y-3 mb-6">
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4">
+              <p className="text-sm text-yellow-200 leading-relaxed" style={{ wordBreak: 'keep-all' }}>
+                외부 AI 서비스 이용 시 아래 사항을 준수해 주세요.
+              </p>
+            </div>
+
+            <ul className="space-y-2 text-sm text-slate-300">
+              <li className="flex items-start gap-2" style={{ wordBreak: 'keep-all' }}>
+                <X className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                <span>회사 내부 자료 입력 금지</span>
+              </li>
+              <li className="flex items-start gap-2" style={{ wordBreak: 'keep-all' }}>
+                <X className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                <span>개인정보 및 민감정보 입력 금지</span>
+              </li>
+              <li className="flex items-start gap-2" style={{ wordBreak: 'keep-all' }}>
+                <X className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                <span>업무용 비밀번호 입력 금지</span>
+              </li>
+              <li className="flex items-start gap-2" style={{ wordBreak: 'keep-all' }}>
+                <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                <span>학습 및 업무 효율화 목적으로만 사용</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* Buttons */}
+          <div className="flex gap-3">
+            <motion.button
+              className="flex-1 py-3 px-4 rounded-xl bg-white/10 border border-white/20 text-slate-300 font-medium"
+              onClick={onClose}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              취소
+            </motion.button>
+            <motion.button
+              className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold shadow-lg"
+              onClick={onConfirm}
+              whileHover={{ scale: 1.02, boxShadow: '0 0 30px rgba(34, 197, 94, 0.5)' }}
+              whileTap={{ scale: 0.98 }}
+            >
+              동의 및 이동
+            </motion.button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   )
 }
 
@@ -1504,6 +1685,11 @@ const DashboardScreen = ({
   const [showSettings, setShowSettings] = useState(false)
   const [showLinkCelebration, setShowLinkCelebration] = useState(false)
   const [showWindTurbineGame, setShowWindTurbineGame] = useState(false)
+  // AI TOOL 관련 state
+  const [aiToolClickRecord, setAIToolClickRecord] = useState<AIToolClickRecord>({ date: '', clickedTools: [] })
+  const [showSecurityModal, setShowSecurityModal] = useState(false)
+  const [pendingTool, setPendingTool] = useState<AITool | null>(null)
+  const [showAIToolToast, setShowAIToolToast] = useState(false)
 
   const selectedCharacter = CHARACTERS.find((c) => c.id === userData.characterId)
 
@@ -1515,6 +1701,7 @@ const DashboardScreen = ({
   useEffect(() => {
     setAIClickRecord(getAIClickRecord())
     setLinkClickRecord(getLinkClickRecord())
+    setAIToolClickRecord(getAIToolClickRecord())
   }, [])
 
   const toggleCard = (cardId: string) => {
@@ -1619,6 +1806,71 @@ const DashboardScreen = ({
   // 링크 보상 가능 여부 확인
   const canEarnLinkExp = (linkId: string) => {
     return !linkClickRecord.clickedLinks.includes(linkId)
+  }
+
+  // AI Tool 보상 가능 여부 확인
+  const canEarnToolExp = (toolId: string) => {
+    return !aiToolClickRecord.clickedTools.includes(toolId)
+  }
+
+  // AI Tool 클릭 시 보안 모달 열기
+  const handleToolClick = (e: React.MouseEvent, tool: AITool) => {
+    e.stopPropagation()
+    setPendingTool(tool)
+    setShowSecurityModal(true)
+  }
+
+  // 보안 동의 후 외부 링크로 이동
+  const handleSecurityConfirm = () => {
+    if (!pendingTool) return
+
+    const toolId = pendingTool.id
+    const url = pendingTool.url
+
+    // 오늘 이 툴을 클릭했는지 확인
+    const record = getAIToolClickRecord()
+    const alreadyClicked = record.clickedTools.includes(toolId)
+
+    // 아직 클릭 안한 경우 EXP 적립
+    if (!alreadyClicked) {
+      // 클릭 기록 업데이트
+      const newRecord: AIToolClickRecord = {
+        date: getTodayKey(),
+        clickedTools: [...record.clickedTools, toolId],
+      }
+      saveAIToolClickRecord(newRecord)
+      setAIToolClickRecord(newRecord)
+
+      // EXP 추가
+      const newTotalExp = userData.totalExp + EXP_LINK_CLICK
+      const oldLevel = Math.floor(userData.totalExp / EXP_PER_LEVEL) + 1
+      const newLvl = Math.floor(newTotalExp / EXP_PER_LEVEL) + 1
+
+      const updatedData: UserData = {
+        ...userData,
+        exp: newTotalExp % EXP_PER_LEVEL,
+        level: newLvl,
+        totalExp: newTotalExp,
+      }
+      onUpdateUserData(updatedData)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData))
+
+      // 토스트 메시지 표시
+      setShowAIToolToast(true)
+
+      // 레벨업 체크
+      if (newLvl > oldLevel) {
+        setTimeout(() => {
+          setNewLevel(newLvl)
+          setShowLevelUp(true)
+        }, 2500)
+      }
+    }
+
+    // 모달 닫고 외부 링크로 이동
+    setShowSecurityModal(false)
+    setPendingTool(null)
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   const handleAIClick = (e: React.MouseEvent) => {
@@ -2119,6 +2371,79 @@ const DashboardScreen = ({
               </motion.div>
             </GlassCard>
           </motion.div>
+
+          {/* AI TOOL Card - 전체 너비 */}
+          <motion.div variants={fadeInUp} className="col-span-2">
+            <GlassCard
+              className="p-4 cursor-pointer"
+              onClick={() => toggleCard('aitool')}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <Wrench className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-sm" style={{ wordBreak: 'keep-all' }}>AI TOOL</h3>
+                  <p className="text-[10px] text-slate-400" style={{ wordBreak: 'keep-all' }}>AI 도구로 업무 효율 UP</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] text-purple-400" style={{ wordBreak: 'keep-all' }}>도구별 하루 1회</p>
+                  <p className="text-[10px] text-green-400 font-medium">+{EXP_LINK_CLICK} EXP</p>
+                </div>
+              </div>
+
+              <AnimatePresence>
+                {expandedCard === 'aitool' && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={springConfig}
+                    className="overflow-hidden"
+                  >
+                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-white/10">
+                      {AI_TOOLS.map((tool) => {
+                        const IconComponent = tool.icon === 'BookOpen' ? BookOpen
+                          : tool.icon === 'Code2' ? Code2
+                          : tool.icon === 'Video' ? Video
+                          : Music
+                        return (
+                          <motion.button
+                            key={tool.id}
+                            className={`py-3 px-3 rounded-xl ${tool.bgClass} text-left relative overflow-hidden transition-colors`}
+                            whileHover={{ scale: 1.02, boxShadow: `0 0 20px ${tool.hoverShadow}` }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={(e) => handleToolClick(e, tool)}
+                          >
+                            <div className="relative z-10">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] text-slate-400 font-medium" style={{ wordBreak: 'keep-all' }}>[{tool.category}]</span>
+                                {canEarnToolExp(tool.id) && (
+                                  <span className="text-[10px] text-green-400 font-bold">+{EXP_LINK_CLICK}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <IconComponent className="w-4 h-4 text-white/80" />
+                                <span className="text-xs text-white font-medium" style={{ wordBreak: 'keep-all', whiteSpace: 'nowrap' }}>{tool.name}</span>
+                                <ExternalLink className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                              </div>
+                            </div>
+                          </motion.button>
+                        )
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <motion.div
+                className="flex justify-end mt-auto pt-2"
+                animate={{ rotate: expandedCard === 'aitool' ? 90 : 0 }}
+              >
+                <ChevronRight className="w-4 h-4 text-slate-500" />
+              </motion.div>
+            </GlassCard>
+          </motion.div>
         </div>
       </motion.section>
 
@@ -2153,6 +2478,27 @@ const DashboardScreen = ({
         onClose={() => setShowWindTurbineGame(false)}
         onEarnExp={handleGameExp}
       />
+
+      {/* Security Consent Modal */}
+      <SecurityConsentModal
+        isOpen={showSecurityModal}
+        onClose={() => {
+          setShowSecurityModal(false)
+          setPendingTool(null)
+        }}
+        onConfirm={handleSecurityConfirm}
+        toolName={pendingTool?.name || ''}
+      />
+
+      {/* AI Tool EXP Toast */}
+      <AnimatePresence>
+        {showAIToolToast && (
+          <AIToolExpToast
+            show={showAIToolToast}
+            onComplete={() => setShowAIToolToast(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
