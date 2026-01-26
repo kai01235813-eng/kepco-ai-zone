@@ -132,9 +132,16 @@ interface AITool {
 }
 
 const AI_TOOLS: AITool[] = [
+  // 자료조사
   { id: 'notebooklm', name: 'NotebookLM', category: '자료조사', url: 'https://notebooklm.google/', bgClass: 'bg-blue-500/20 hover:bg-blue-500/30', hoverShadow: 'rgba(59, 130, 246, 0.4)', icon: 'BookOpen' },
-  { id: 'claude-code', name: 'Claude Code / AI Studio', category: '바이브코딩', url: 'https://code.claude.com/', bgClass: 'bg-purple-500/20 hover:bg-purple-500/30', hoverShadow: 'rgba(168, 85, 247, 0.4)', icon: 'Code2' },
+  // 바이브코딩 (4개)
+  { id: 'claude-ai', name: 'Claude AI', category: '바이브코딩', url: 'https://claude.ai/new', bgClass: 'bg-purple-500/20 hover:bg-purple-500/30', hoverShadow: 'rgba(168, 85, 247, 0.4)', icon: 'Code2' },
+  { id: 'google-ai-studio', name: 'Google AI Studio', category: '바이브코딩', url: 'https://aistudio.google.com/', bgClass: 'bg-violet-500/20 hover:bg-violet-500/30', hoverShadow: 'rgba(139, 92, 246, 0.4)', icon: 'Code2' },
+  { id: 'bolt-new', name: 'Bolt.new', category: '바이브코딩', url: 'https://bolt.new/', bgClass: 'bg-indigo-500/20 hover:bg-indigo-500/30', hoverShadow: 'rgba(99, 102, 241, 0.4)', icon: 'Code2' },
+  { id: 'cursor-ai', name: 'Cursor AI', category: '바이브코딩', url: 'https://cursor.com/agents', bgClass: 'bg-fuchsia-500/20 hover:bg-fuchsia-500/30', hoverShadow: 'rgba(217, 70, 239, 0.4)', icon: 'Code2' },
+  // 영상생성
   { id: 'invideo', name: 'Invideo', category: '영상생성', url: 'https://ai.invideo.io', bgClass: 'bg-red-500/20 hover:bg-red-500/30', hoverShadow: 'rgba(239, 68, 68, 0.4)', icon: 'Video' },
+  // 음악생성
   { id: 'suno', name: 'Suno AI', category: '음악생성', url: 'https://suno.com/', bgClass: 'bg-green-500/20 hover:bg-green-500/30', hoverShadow: 'rgba(34, 197, 94, 0.4)', icon: 'Music' },
 ]
 
