@@ -1934,6 +1934,15 @@ const DashboardScreen = ({
     window.open('https://knai-safetyprompt-web.vercel.app/', '_blank', 'noopener,noreferrer')
   }
 
+  // EGG: 에너지그리드 게임 핸들러 (향후 EXP API 연동 대비)
+  const handleEnergyGridGame = (e: React.MouseEvent) => {
+    e.stopPropagation()
+
+    // TODO: 추후 게임 완료 후 EXP 데이터를 받아올 API 연동 예정
+    // 현재는 외부 배포 URL로 이동만 처리
+    window.open('https://energy-grid-game.vercel.app/', '_blank', 'noopener,noreferrer')
+  }
+
   useEffect(() => {
     if (isNFCAccess) {
       setShowCheckInModal(true)
@@ -2224,6 +2233,34 @@ const DashboardScreen = ({
                         </span>
                         <span className="relative z-10 text-green-400 font-medium">EXP</span>
                       </motion.button>
+
+                      {/* EGG: 에너지그리드 게임 (BETA) */}
+                      <motion.button
+                        className="w-full py-2.5 px-3 rounded-lg bg-gradient-to-r from-yellow-500/20 to-amber-500/20 text-[10px] text-left relative overflow-hidden group border border-yellow-400/30"
+                        whileHover={{ scale: 1.02, boxShadow: '0 0 25px rgba(250, 204, 21, 0.5)' }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleEnergyGridGame}
+                        style={{ wordBreak: 'keep-all' }}
+                      >
+                        <motion.div
+                          className="absolute inset-0 bg-gradient-to-r from-yellow-400/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+                        />
+                        {/* BETA Badge */}
+                        <div className="absolute -top-1 -right-1 bg-yellow-400 text-black text-[8px] font-black px-1.5 py-0.5 rounded-bl-md rounded-tr-lg">
+                          BETA
+                        </div>
+                        <div className="relative z-10 flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Zap className="w-3.5 h-3.5 text-yellow-400" />
+                            <div className="flex flex-col">
+                              <span className="text-yellow-300 font-semibold leading-tight">EGG: 에너지그리드</span>
+                              <span className="text-[8px] text-slate-400 leading-tight mt-0.5">경남 전력망 운영 시뮬레이션</span>
+                            </div>
+                          </div>
+                          <ExternalLink className="w-3 h-3 text-yellow-400/70" />
+                        </div>
+                      </motion.button>
+
                       {/* 개발중인 게임 슬롯 */}
                       <motion.button
                         className="w-full py-2 px-3 rounded-lg bg-white/5 text-[10px] text-slate-500 text-left flex items-center gap-2 cursor-not-allowed"
