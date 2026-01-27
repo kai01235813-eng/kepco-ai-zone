@@ -1506,7 +1506,7 @@ const OnboardingScreen = ({
           <Zap className="w-8 h-8 text-kepco-cyan" />
         </motion.div>
         <h1 className="text-3xl font-bold text-gradient mb-2">KEPCO AI ZONE</h1>
-        <p className="text-slate-400 text-sm">경남본부 AI 혁신 플랫폼</p>
+        <p className="text-slate-400 text-sm">(비공식) KN AI 혁신 플랫폼</p>
 
         {/* YouTube Intro Button */}
         <motion.button
@@ -2006,7 +2006,7 @@ const DashboardScreen = ({
           <h1 className="text-2xl font-bold text-gradient">KEPCO AI ZONE</h1>
           <Zap className="w-6 h-6 text-kepco-cyan" />
         </motion.div>
-        <p className="text-slate-400 text-sm">경남본부 AI 혁신 플랫폼</p>
+        <p className="text-slate-400 text-sm">(비공식) KN AI 혁신 플랫폼</p>
       </motion.header>
 
       {/* Profile Section */}
