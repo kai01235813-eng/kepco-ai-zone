@@ -3,7 +3,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'KEPCO AI ZONE',
-  description: '경남본부 AI 혁신 플랫폼',
+  description: '(비공식) KN AI 혁신 플랫폼',
   manifest: '/manifest.json',
 }
 
